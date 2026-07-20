@@ -5,5 +5,5 @@
   "minAppVersion": "1.5.0",
   "description": "Talk to your notes by voice.",
   "author": "Fernando",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

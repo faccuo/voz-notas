@@ -20,6 +20,9 @@ dist-ssr
 # Obsidian plugin build output
 main.js
 
+# Plugin data (contains the API key — never commit)
+data.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
