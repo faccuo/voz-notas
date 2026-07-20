@@ -1,15 +1,17 @@
 {
   "name": "voz-notas",
+  "version": "0.0.1",
+  "description": "Talk to your notes by voice.",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
   },
   "devDependencies": {
-    "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "@types/node": "latest",
+    "builtin-modules": "latest",
+    "esbuild": "latest",
+    "obsidian": "latest",
+    "typescript": "~6.0.2"
   }
 }

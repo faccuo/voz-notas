@@ -17,6 +17,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Obsidian plugin build output
+main.js
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
