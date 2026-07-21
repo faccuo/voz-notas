@@ -43,7 +43,10 @@ export async function startVoiceSession(
 
   // Data channel: JSON events (session config, tool calls, transcripts).
   const dc = pc.createDataChannel('oai-events')
-  const send = (msg: object) => dc.send(JSON.stringify(msg))
+  const send = (msg: object) => {
+    // Guard: the channel may have closed (session ended) before we reply.
+    if (dc.readyState === 'open') dc.send(JSON.stringify(msg))
+  }
 
   // Once the channel opens, declare our instructions + tools.
   dc.addEventListener('open', () => {

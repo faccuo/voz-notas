@@ -1,6 +1,6 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, requestUrl } from 'obsidian'
 import { startVoiceSession, type VoiceSession, type ToolDef } from './core/voice'
-import { searchNotes, type Note } from './core/retrieval'
+import { snippetAround, type Note } from './core/retrieval'
 
 interface VozNotasSettings {
   apiKey: string
@@ -29,6 +29,7 @@ export default class VozNotasPlugin extends Plugin {
   settings!: VozNotasSettings // set in onload() via loadSettings()
   session: VoiceSession | null = null
   notesCache: Note[] | null = null
+  notesReadPromise: Promise<Note[]> | null = null
 
   async onload() {
     await this.loadSettings()
@@ -79,6 +80,11 @@ export default class VozNotasPlugin extends Plugin {
       return
     }
     try {
+      // Build the note index BEFORE connecting, so in-session search is pure in-memory.
+      if (!this.notesCache || this.notesCache.length === 0) {
+        new Notice('Preparing your notes…')
+        await this.readVault()
+      }
       new Notice('Connecting…')
       const token = await this.getEphemeralToken()
       this.session = await startVoiceSession((offerSdp) => this.postSdp(offerSdp, token), {
@@ -97,28 +103,61 @@ export default class VozNotasPlugin extends Plugin {
   async handleToolCall(name: string, args: any): Promise<string> {
     console.log('tool call:', name, args)
     if (name === 'search_notes') {
-      const notes = await this.readVault()
-      const hits = searchNotes(notes, String(args?.query ?? ''), 3)
-      if (hits.length === 0) return 'No matching notes found.'
-      return hits.map((h) => `Note: ${h.path}\n${h.snippet}`).join('\n\n---\n\n')
+      const hits = this.searchNotes(String(args?.query ?? ''), 3)
+      if (hits.length > 0) return hits.map((h) => `Note: ${h.path}\n${h.snippet}`).join('\n\n---\n\n')
+      return this.notesCache?.length ? 'No matching notes found.' : 'Notes are still loading.'
     }
     return `Unknown tool: ${name}`
   }
 
+  // Synchronous, in-memory keyword search over the pre-built cache. Instant, no I/O.
+  searchNotes(query: string, limit = 3): { path: string; snippet: string }[] {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+    const notes = this.notesCache ?? []
+    if (terms.length === 0 || notes.length === 0) return []
+    const t0 = Date.now()
+    const scored: { note: Note; score: number; at: number }[] = []
+    for (const note of notes) {
+      const lower = note.content.toLowerCase()
+      let score = 0
+      let at = -1
+      for (const term of terms) {
+        const idx = lower.indexOf(term)
+        if (idx >= 0) {
+          score++
+          if (at < 0 || idx < at) at = idx
+        }
+      }
+      if (score > 0) scored.push({ note, score, at: at < 0 ? 0 : at })
+    }
+    scored.sort((a, b) => b.score - a.score) // more matched terms = better
+    console.log(`search: ${scored.length} matches in ${Date.now() - t0}ms`)
+    return scored.slice(0, limit).map(({ note, at }) => ({
+      path: note.path,
+      snippet: snippetAround(note.content, at),
+    }))
+  }
+
   // Read all Markdown notes from the vault, cached and in parallel. (Obsidian-specific.)
+  // Dedups concurrent reads: callers share one in-flight read instead of starting more.
   async readVault(): Promise<Note[]> {
     if (this.notesCache && this.notesCache.length > 0) return this.notesCache
-    const t0 = Date.now()
-    const files = this.app.vault.getMarkdownFiles()
-    const notes = await Promise.all(
-      files.map(async (file) => ({
-        path: file.path,
-        content: await this.app.vault.cachedRead(file),
-      })),
-    )
-    this.notesCache = notes
-    console.log(`voz-notas: read ${notes.length} notes in ${Date.now() - t0}ms`)
-    return notes
+    if (this.notesReadPromise) return this.notesReadPromise
+    this.notesReadPromise = (async () => {
+      const t0 = Date.now()
+      const files = this.app.vault.getMarkdownFiles()
+      const notes = await Promise.all(
+        files.map(async (file) => ({
+          path: file.path,
+          content: await this.app.vault.cachedRead(file),
+        })),
+      )
+      this.notesCache = notes
+      this.notesReadPromise = null
+      console.log(`voz-notas: read ${notes.length} notes in ${Date.now() - t0}ms`)
+      return notes
+    })()
+    return this.notesReadPromise
   }
 
   // Mint a short-lived ephemeral token using the user's key.
