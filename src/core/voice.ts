@@ -3,11 +3,27 @@
 
 export interface VoiceSession {
   stop(): void
+  setMuted(muted: boolean): void
+  isMuted(): boolean
 }
 
-// signalSdp: given our offer SDP, return OpenAI's answer SDP.
+export interface ToolDef {
+  type: 'function'
+  name: string
+  description: string
+  parameters: object
+}
+
+export interface VoiceConfig {
+  instructions?: string
+  tools?: ToolDef[]
+  // Run a tool the model asked for; return its result as a string.
+  onToolCall?: (name: string, args: any) => Promise<string>
+}
+
 export async function startVoiceSession(
   signalSdp: (offerSdp: string) => Promise<string>,
+  config: VoiceConfig = {},
 ): Promise<VoiceSession> {
   const pc = new RTCPeerConnection()
 
@@ -17,12 +33,56 @@ export async function startVoiceSession(
   pc.ontrack = (e) => (audioEl.srcObject = e.streams[0])
 
   // Capture the mic and send it over the connection.
-  const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
-  mic.getTracks().forEach((track) => pc.addTrack(track, mic))
+  // Echo cancellation stops the model from hearing its own voice and cutting itself off.
+  const mic = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  })
+  const micTracks = mic.getTracks()
+  micTracks.forEach((track) => pc.addTrack(track, mic))
+  let muted = false
 
-  // Data channel for JSON events (transcripts now, tool calls in P2).
+  // Data channel: JSON events (session config, tool calls, transcripts).
   const dc = pc.createDataChannel('oai-events')
-  dc.addEventListener('message', (e) => console.log('event:', e.data))
+  const send = (msg: object) => dc.send(JSON.stringify(msg))
+
+  // Once the channel opens, declare our instructions + tools.
+  dc.addEventListener('open', () => {
+    if (config.instructions || config.tools) {
+      send({
+        type: 'session.update',
+        session: {
+          type: 'realtime', // required by the API
+          ...(config.instructions ? { instructions: config.instructions } : {}),
+          ...(config.tools ? { tools: config.tools, tool_choice: 'auto' } : {}),
+        },
+      })
+    }
+  })
+
+  // Handle events from the model — including tool calls.
+  dc.addEventListener('message', async (e) => {
+    const event = JSON.parse(e.data)
+
+    if (event.type === 'response.function_call_arguments.done') {
+      // The model wants to run a tool. Run it, return the result, ask it to continue.
+      let output = ''
+      try {
+        const args = JSON.parse(event.arguments || '{}')
+        output = config.onToolCall ? await config.onToolCall(event.name, args) : ''
+      } catch (err) {
+        output = 'Error: ' + (err as Error).message
+      }
+      send({
+        type: 'conversation.item.create',
+        item: { type: 'function_call_output', call_id: event.call_id, output },
+      })
+      send({ type: 'response.create' })
+    }
+
+    if (event.type === 'error') {
+      console.error('realtime error:', JSON.stringify(event.error ?? event, null, 2))
+    }
+  })
 
   // Offer -> (signaling) -> answer.
   const offer = await pc.createOffer()
@@ -33,8 +93,16 @@ export async function startVoiceSession(
 
   return {
     stop() {
-      mic.getTracks().forEach((track) => track.stop())
+      micTracks.forEach((track) => track.stop())
       pc.close()
+    },
+    setMuted(m: boolean) {
+      muted = m
+      // Disabling the track stops sending audio without dropping the connection.
+      micTracks.forEach((track) => (track.enabled = !m))
+    },
+    isMuted() {
+      return muted
     },
   }
 }
