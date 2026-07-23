@@ -63,11 +63,31 @@ export async function startVoiceSession(
   })
 
   // Handle events from the model — including tool calls.
+  // Only one response can be active at a time. Coalesce our response.create calls so
+  // multiple tool calls in a turn don't collide ("conversation_already_has_active_response").
+  let responseActive = false
+  let wantResponse = false
+  const requestResponse = () => {
+    if (responseActive) {
+      wantResponse = true
+    } else {
+      responseActive = true
+      wantResponse = false
+      send({ type: 'response.create' })
+    }
+  }
+
   dc.addEventListener('message', async (e) => {
     const event = JSON.parse(e.data)
 
+    if (event.type === 'response.created') responseActive = true
+    if (event.type === 'response.done') {
+      responseActive = false
+      if (wantResponse) requestResponse()
+    }
+
     if (event.type === 'response.function_call_arguments.done') {
-      // The model wants to run a tool. Run it, return the result, ask it to continue.
+      // The model wants to run a tool. Run it, return the result, then ask it to continue.
       let output = ''
       try {
         const args = JSON.parse(event.arguments || '{}')
@@ -79,7 +99,7 @@ export async function startVoiceSession(
         type: 'conversation.item.create',
         item: { type: 'function_call_output', call_id: event.call_id, output },
       })
-      send({ type: 'response.create' })
+      requestResponse()
     }
 
     if (event.type === 'error') {
