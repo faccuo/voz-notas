@@ -128,6 +128,32 @@
   .vn-orb.is-pulse::before { animation: none; }
 }
 
+/* status-bar call indicator */
+.vn-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.vn-sb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-red, #e93147);
+  animation: vn-sb-pulse 1.6s ease-in-out infinite;
+}
+.vn-sb-dot.is-muted {
+  background: var(--text-muted);
+  animation: none;
+}
+@keyframes vn-sb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-sb-dot { animation: none; }
+}
+
 .vn-transcript {
   flex: 1;
   overflow-y: auto;

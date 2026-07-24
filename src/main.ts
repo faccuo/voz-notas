@@ -277,6 +277,7 @@ export default class VozNotasPlugin extends Plugin {
   // Set when the model calls end_session: we close AFTER its goodbye finishes playing.
   private pendingEndSession = false
   private endFallbackTimer: number | null = null
+  private statusBarEl: HTMLElement | null = null
 
   async onload() {
     await this.loadSettings()
@@ -287,6 +288,13 @@ export default class VozNotasPlugin extends Plugin {
     // The ribbon icon ONLY opens/closes the panel. The call is controlled from
     // the panel itself: orb = connect/mute, red button or "goodbye" = hang up.
     this.addRibbonIcon('mic', 'voz-notas', () => void this.togglePanel())
+
+    // Status bar: while a call is live, a pulsing dot — so a hot mic is never
+    // invisible, even with the panel closed. Click to reopen the panel.
+    this.statusBarEl = this.addStatusBarItem()
+    this.statusBarEl.addClass('vn-statusbar')
+    this.statusBarEl.hide()
+    this.statusBarEl.onClickEvent(() => void this.activateView())
     this.addCommand({
       id: 'toggle-voice',
       name: 'Start / end voice session',
@@ -405,6 +413,23 @@ export default class VozNotasPlugin extends Plugin {
     }
   }
 
+  // Reflect the call state in the status bar (red pulsing dot = mic live,
+  // grey still dot = muted, hidden = no call).
+  updateStatusBar() {
+    const el = this.statusBarEl
+    if (!el) return
+    if (!this.session) {
+      el.hide()
+      return
+    }
+    const name = this.settings.assistantName?.trim() || 'Eco'
+    const muted = this.session.isMuted()
+    el.empty()
+    el.createSpan({ cls: 'vn-sb-dot' + (muted ? ' is-muted' : '') })
+    el.createSpan({ text: `${name} · ${muted ? t('statusbar.muted') : t('statusbar.live')}` })
+    el.show()
+  }
+
   // A tool touched this note — track it for the session note and show it in the panel.
   noteConsulted(path: string) {
     this.sessionConsulted.add(path)
@@ -492,6 +517,7 @@ export default class VozNotasPlugin extends Plugin {
     const next = !this.session.isMuted()
     this.session.setMuted(next)
     this.getView()?.setMuted(next)
+    this.updateStatusBar()
   }
 
   async toggleVoice() {
@@ -504,6 +530,7 @@ export default class VozNotasPlugin extends Plugin {
       const view = this.getView()
       view?.stopLevelMeter()
       view?.setActive(false)
+      this.updateStatusBar()
       new Notice(t('notice.ended'))
       await this.endSessionNote()
       return
@@ -554,12 +581,14 @@ export default class VozNotasPlugin extends Plugin {
       const liveView = this.getView()
       liveView?.setActive(true)
       liveView?.startLevelMeter(() => this.session?.getLevel() ?? 0)
+      this.updateStatusBar()
       new Notice(t('notice.connected'))
     } catch (e) {
       console.error(e)
       const view = this.getView()
       view?.stopLevelMeter()
       view?.setActive(false)
+      this.updateStatusBar()
       new Notice(t('notice.error', (e as Error).message))
     }
   }
