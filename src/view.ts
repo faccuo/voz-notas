@@ -43,6 +43,11 @@ export class VozNotasView extends ItemView {
     const root = this.contentEl
     root.empty()
     root.addClass('vn-panel')
+    // Reset per-view state so onOpen is idempotent (Obsidian can re-run it,
+    // e.g. when a leaf is moved) — the DOM above was just wiped.
+    this.consulted.clear()
+    this.pendingUser.clear()
+    this.currentAssistant = null
 
     const orbWrap = root.createDiv({ cls: 'vn-orbwrap' })
     this.orbEl = orbWrap.createDiv({ cls: 'vn-orb' })
@@ -66,6 +71,29 @@ export class VozNotasView extends ItemView {
 
     this.refreshLang()
     this.applyPhase()
+    this.syncFromPlugin()
+  }
+
+  // The call lives in the plugin, not in this panel — closing the panel never
+  // hangs up. So when the panel (re)opens mid-session, rebuild the UI from the
+  // plugin's state: full transcript, consulted notes, orb state.
+  private syncFromPlugin() {
+    const plugin = this.plugin
+    if (!plugin.session) return
+    for (const turn of plugin.sessionLog) {
+      if (turn.role === 'user') {
+        if (turn.text) this.transcriptEl.createDiv({ cls: 'vn-turn vn-user', text: turn.text })
+        else if (turn.id) this.addUserPlaceholder(turn.id)
+      } else if (turn.text) {
+        this.appendAssistant(turn.text)
+        this.finishAssistant()
+      }
+    }
+    plugin.sessionConsulted.forEach((p) => this.addConsulted(p))
+    this.setActive(true)
+    if (plugin.session.isMuted()) this.setMuted(true)
+    this.startLevelMeter(() => plugin.session?.getLevel() ?? 0)
+    this.scroll()
   }
 
   setActive(active: boolean) {
