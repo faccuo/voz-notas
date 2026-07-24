@@ -284,9 +284,14 @@ export default class VozNotasPlugin extends Plugin {
     // Register the settings pane (where the API key lives).
     this.addSettingTab(new VozNotasSettingTab(this.app, this))
 
-    // Click the mic to start a voice session; click again to stop.
-    // (Mute lives on the orb inside the panel — click it to mute/unmute.)
-    this.addRibbonIcon('mic', 'voz-notas', () => this.toggleVoice())
+    // The ribbon icon ONLY opens/closes the panel. The call is controlled from
+    // the panel itself: orb = connect/mute, red button or "goodbye" = hang up.
+    this.addRibbonIcon('mic', 'voz-notas', () => void this.togglePanel())
+    this.addCommand({
+      id: 'toggle-voice',
+      name: 'Start / end voice session',
+      callback: () => void this.toggleVoice(),
+    })
     this.addCommand({
       id: 'toggle-mute',
       name: 'Toggle mute',
@@ -318,6 +323,14 @@ export default class VozNotasPlugin extends Plugin {
   getView(): VozNotasView | null {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE)
     return leaves.length ? (leaves[0].view as VozNotasView) : null
+  }
+
+  // Show/hide the panel. Closing it does NOT hang up a live call — the call
+  // lives in the plugin, and the panel reattaches to it when reopened.
+  async togglePanel() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE)
+    if (leaves.length > 0) leaves.forEach((leaf) => leaf.detach())
+    else await this.activateView()
   }
 
   async activateView(): Promise<VozNotasView> {
