@@ -128,8 +128,12 @@
   .vn-orb.is-pulse::before { animation: none; }
 }
 
-/* status-bar call indicator */
+/* status-bar call indicator — hidden unless a call is live (class-driven,
+   no inline styles, so nothing can get out of sync) */
 .vn-statusbar {
+  display: none;
+}
+.vn-statusbar.is-live {
   display: flex;
   align-items: center;
   gap: 5px;

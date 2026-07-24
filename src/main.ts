@@ -289,8 +289,7 @@ export default class VozNotasPlugin extends Plugin {
     // Status bar: while a call is live, a pulsing dot — so a hot mic is never
     // invisible, even with the panel closed. Click to reopen the panel.
     this.statusBarEl = this.addStatusBarItem()
-    this.statusBarEl.addClass('vn-statusbar')
-    this.statusBarEl.hide()
+    this.statusBarEl.addClass('vn-statusbar', 'mod-clickable')
     this.statusBarEl.onClickEvent(() => void this.activateView())
     this.addCommand({
       id: 'toggle-voice',
@@ -425,16 +424,13 @@ export default class VozNotasPlugin extends Plugin {
   updateStatusBar() {
     const el = this.statusBarEl
     if (!el) return
-    if (!this.session) {
-      el.hide()
-      return
-    }
+    el.empty()
+    el.toggleClass('is-live', !!this.session)
+    if (!this.session) return
     const name = this.settings.assistantName?.trim() || 'Eco'
     const muted = this.session.isMuted()
-    el.empty()
     el.createSpan({ cls: 'vn-sb-dot' + (muted ? ' is-muted' : '') })
     el.createSpan({ text: `${name} · ${muted ? t('statusbar.muted') : t('statusbar.live')}` })
-    el.show()
   }
 
   // A tool touched this note — track it for the session note and show it in the panel.
