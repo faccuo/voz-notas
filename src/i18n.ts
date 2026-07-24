@@ -12,6 +12,7 @@ const STRINGS: Record<Lang, Dict> = {
     'orb.live': 'Listening · tap to mute',
     'orb.muted': 'Muted · tap to talk',
     'orb.aria': 'Press to connect · click while live to mute',
+    'orb.stop': 'End session',
     'panel.consulted': 'Consulted',
     'notice.setKey': 'Set your OpenAI API key in voz-notas settings first.',
     'notice.preparing': 'Preparing your notes…',
@@ -21,6 +22,11 @@ const STRINGS: Record<Lang, Dict> = {
     'notice.error': 'Voice error: {0}',
     'settings.language.name': 'Language',
     'settings.language.desc': 'Language of the plugin interface.',
+    'settings.saveSessions.name': 'Save session transcripts',
+    'settings.saveSessions.desc':
+      'Save each voice session as a note in "voz-notas/sessions". The assistant can search them — they become its memory of past conversations.',
+    'settings.assistantName.name': 'Assistant name',
+    'settings.assistantName.desc': 'What the assistant is called — its identity when you talk, and its label in session notes.',
   },
   es: {
     'orb.idle': 'Pulsa para conectar',
@@ -28,6 +34,7 @@ const STRINGS: Record<Lang, Dict> = {
     'orb.live': 'Escuchando · toca para silenciar',
     'orb.muted': 'Silenciado · toca para hablar',
     'orb.aria': 'Pulsa para conectar · haz clic en directo para silenciar',
+    'orb.stop': 'Terminar sesión',
     'panel.consulted': 'Consultado',
     'notice.setKey': 'Añade tu clave de OpenAI en los ajustes de voz-notas primero.',
     'notice.preparing': 'Preparando tus notas…',
@@ -37,6 +44,11 @@ const STRINGS: Record<Lang, Dict> = {
     'notice.error': 'Error de voz: {0}',
     'settings.language.name': 'Idioma',
     'settings.language.desc': 'Idioma de la interfaz del plugin.',
+    'settings.saveSessions.name': 'Guardar transcripciones de sesión',
+    'settings.saveSessions.desc':
+      'Guarda cada sesión de voz como nota en "voz-notas/sessions". El asistente puede buscarlas — son su memoria de conversaciones pasadas.',
+    'settings.assistantName.name': 'Nombre del asistente',
+    'settings.assistantName.desc': 'Cómo se llama el asistente — su identidad al hablar y su etiqueta en las notas de sesión.',
   },
 }
 

@@ -13,10 +13,43 @@
   gap: 10px;
   padding: 14px 0 8px;
 }
+.vn-statusrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .vn-status {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   letter-spacing: 0.02em;
+}
+/* hang-up button — a soft red pebble, sized to feel kin to the orb */
+.vn-stop {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-red, #e93147) 14%, var(--background-secondary));
+  color: color-mix(in srgb, var(--color-red, #e93147) 75%, var(--text-muted));
+  cursor: pointer;
+  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--color-red, #e93147) 40%, transparent);
+  transition: background 0.15s ease, transform 0.15s ease, color 0.15s ease;
+}
+.vn-stop.is-visible {
+  display: flex;
+}
+.vn-stop:hover {
+  background: color-mix(in srgb, var(--color-red, #e93147) 85%, var(--background-secondary));
+  color: #fff;
+  transform: scale(1.08);
+}
+.vn-stop svg {
+  width: 17px;
+  height: 17px;
 }
 
 .vn-orb {

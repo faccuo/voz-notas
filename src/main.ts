@@ -9,6 +9,8 @@ interface VozNotasSettings {
   reasoningModel: string
   agentsFile: string
   language: Lang
+  saveSessions: boolean
+  assistantName: string
 }
 
 const DEFAULT_SETTINGS: VozNotasSettings = {
@@ -16,6 +18,8 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   reasoningModel: 'gpt-5',
   agentsFile: 'AGENTS.md',
   language: 'en',
+  saveSessions: true,
+  assistantName: 'Eco',
 }
 
 const INSTRUCTIONS = `You are a voice assistant over the user's personal Obsidian notes (Markdown, linked with [[wikilinks]], tagged with #tags).
@@ -52,6 +56,8 @@ Behaviour:
 - If they ask to open/show a note, call open_note.
 - For "related ideas" or "what links here", use get_links. For tags, use list_tags / find_notes_by_tag.
 - When the user asks you to remember a preference or change how you behave from now on (e.g. "when I talk about writing, don't give creative ideas"), confirm briefly, then call remember_rule with a concise rule.
+- Past sessions are saved as notes under "voz-notas/sessions" — when the user refers to an earlier conversation ("what did we talk about yesterday?"), search or list that folder.
+- When the user says goodbye or asks to end the session ("adiós", "cierra la sesión", "we're done"), call end_session and then say a SHORT goodbye — the session closes when you finish speaking. No confirmation needed.
 - Before any write (create_note, append_to_note, insert_text, remember_rule): ask a SHORT confirmation like "¿lo hago?" — do NOT read the whole text back. Only write after they say yes.
 Always use the exact path from search_notes. Respond in the user's language, briefly and conversationally.
 Do NOT narrate your steps or announce which tool you are using — just act and give the result. Keep replies short. Never read a note verbatim unless asked.`
@@ -243,13 +249,34 @@ const REMEMBER_TOOL: ToolDef = {
   },
 }
 
+const END_SESSION_TOOL: ToolDef = {
+  type: 'function',
+  name: 'end_session',
+  description:
+    'End the voice session. Call when the user says goodbye or asks to close/stop the session ("adiós", "cierra", "we\'re done"). Say a brief goodbye after calling it — the session closes once you finish speaking.',
+  parameters: { type: 'object', properties: {}, required: [] },
+}
+
 const NEW_NOTES_FOLDER = 'voz-notas'
+// Session transcripts live in the vault → search_notes indexes them → the
+// assistant gets memory of past conversations for free.
+const SESSIONS_FOLDER = 'voz-notas/sessions'
 
 export default class VozNotasPlugin extends Plugin {
   settings!: VozNotasSettings // set in onload() via loadSettings()
   session: VoiceSession | null = null
   notesCache: Note[] | null = null
   notesReadPromise: Promise<Note[]> | null = null
+  // Transcript of the current session, kept here (not in the view) so it
+  // survives the panel being closed. Saved as a note when the session ends.
+  sessionLog: Array<{ role: 'user' | 'assistant'; id?: string; text: string }> = []
+  sessionConsulted = new Set<string>()
+  sessionStart: Date | null = null
+  sessionNotePath: string | null = null
+  private flushTimer: number | null = null
+  // Set when the model calls end_session: we close AFTER its goodbye finishes playing.
+  private pendingEndSession = false
+  private endFallbackTimer: number | null = null
 
   async onload() {
     await this.loadSettings()
@@ -282,6 +309,9 @@ export default class VozNotasPlugin extends Plugin {
   onunload() {
     this.session?.stop()
     this.session = null
+    // Best-effort: the incremental flushes have already saved everything but
+    // possibly the very last turn.
+    void this.flushSessionNote()
   }
 
   // --- Side panel ---
@@ -300,8 +330,44 @@ export default class VozNotasPlugin extends Plugin {
     return leaf?.view as VozNotasView
   }
 
-  // Route realtime events to the panel (transcript both sides + orb pulse).
+  // Route realtime events to the session log (memory) and the panel (UI).
   onRealtimeEvent(event: any) {
+    // Deferred hang-up: the model called end_session and has now finished
+    // speaking its goodbye — close for real.
+    if (this.pendingEndSession && event.type === 'output_audio_buffer.stopped') {
+      this.pendingEndSession = false
+      if (this.endFallbackTimer != null) window.clearTimeout(this.endFallbackTimer)
+      this.endFallbackTimer = null
+      if (this.session) void this.toggleVoice()
+      return
+    }
+
+    // Log first — it must work even with the panel closed. Same placeholder
+    // trick as the UI: reserve the user's turn on speech, fill it when the
+    // (slower) transcription arrives, so the saved note reads in order.
+    switch (event.type) {
+      case 'conversation.item.added':
+      case 'conversation.item.created':
+        if (event.item?.role === 'user' && event.item?.id) {
+          if (!this.sessionLog.some((e) => e.id === event.item.id)) {
+            this.sessionLog.push({ role: 'user', id: event.item.id, text: '' })
+          }
+        }
+        break
+      case 'conversation.item.input_audio_transcription.completed': {
+        const entry = this.sessionLog.find((e) => e.id === event.item_id)
+        if (entry) entry.text = (event.transcript ?? '').trim()
+        this.scheduleSessionFlush()
+        break
+      }
+      case 'response.output_audio_transcript.done':
+        if (event.transcript?.trim()) {
+          this.sessionLog.push({ role: 'assistant', text: event.transcript.trim() })
+          this.scheduleSessionFlush()
+        }
+        break
+    }
+
     const view = this.getView()
     if (!view) return
     switch (event.type) {
@@ -326,6 +392,79 @@ export default class VozNotasPlugin extends Plugin {
     }
   }
 
+  // A tool touched this note — track it for the session note and show it in the panel.
+  noteConsulted(path: string) {
+    this.sessionConsulted.add(path)
+    this.getView()?.addConsulted(path)
+  }
+
+  // The session is saved INCREMENTALLY: the note is created on the first turn
+  // and rewritten (debounced) after every exchange — so Cmd+Q, a crash or a
+  // dead battery lose at most the last second. Because it's a normal note,
+  // search_notes indexes it → past conversations become memory for free, and
+  // the [[wikilinks]] to consulted notes tie sessions into the graph.
+  scheduleSessionFlush() {
+    if (!this.settings.saveSessions) return
+    if (this.flushTimer != null) window.clearTimeout(this.flushTimer)
+    this.flushTimer = window.setTimeout(() => void this.flushSessionNote(), 800)
+  }
+
+  async flushSessionNote() {
+    if (!this.settings.saveSessions) return
+    const turns = this.sessionLog.filter((e) => e.text)
+    if (turns.length === 0) return
+    try {
+      const d = this.sessionStart ?? new Date()
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      const time = `${pad(d.getHours())}.${pad(d.getMinutes())}`
+
+      const name = this.settings.assistantName?.trim() || 'Eco'
+      const lines = turns.map((e) => (e.role === 'user' ? `**Me:** ${e.text}` : `**${name}:** ${e.text}`))
+      const consulted = [...this.sessionConsulted].map((p) => `- [[${p.replace(/\.md$/, '')}]]`)
+      const body = [
+        `# Voice session — ${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        '',
+        lines.join('\n\n'),
+        ...(consulted.length ? ['', '## Notes consulted', '', consulted.join('\n')] : []),
+        '',
+      ].join('\n')
+
+      if (!this.sessionNotePath) {
+        if (!this.app.vault.getAbstractFileByPath(SESSIONS_FOLDER)) {
+          await this.app.vault.createFolder(SESSIONS_FOLDER).catch(() => {})
+        }
+        let path = `${SESSIONS_FOLDER}/${day} ${time}.md`
+        let n = 1
+        while (this.app.vault.getAbstractFileByPath(path)) path = `${SESSIONS_FOLDER}/${day} ${time} (${++n}).md`
+        await this.app.vault.create(path, body)
+        this.sessionNotePath = path
+      } else {
+        const file = this.app.vault.getAbstractFileByPath(this.sessionNotePath)
+        if (file instanceof TFile) await this.app.vault.modify(file, body)
+      }
+      // Keep the in-memory index in sync so this very session is searchable.
+      if (this.notesCache) {
+        const cached = this.notesCache.find((note) => note.path === this.sessionNotePath)
+        if (cached) cached.content = body
+        else this.notesCache.push({ path: this.sessionNotePath, content: body })
+      }
+    } catch (e) {
+      console.error('voz-notas: failed to save session note', e)
+    }
+  }
+
+  // Final flush + reset when a session ends cleanly.
+  async endSessionNote() {
+    if (this.flushTimer != null) window.clearTimeout(this.flushTimer)
+    this.flushTimer = null
+    await this.flushSessionNote()
+    this.sessionLog = []
+    this.sessionConsulted.clear()
+    this.sessionStart = null
+    this.sessionNotePath = null
+  }
+
   // Click the orb: start a session if idle, otherwise mute/unmute.
   onOrbClick() {
     if (this.session) this.toggleMute()
@@ -346,10 +485,14 @@ export default class VozNotasPlugin extends Plugin {
     if (this.session) {
       this.session.stop()
       this.session = null
+      this.pendingEndSession = false
+      if (this.endFallbackTimer != null) window.clearTimeout(this.endFallbackTimer)
+      this.endFallbackTimer = null
       const view = this.getView()
       view?.stopLevelMeter()
       view?.setActive(false)
       new Notice(t('notice.ended'))
+      await this.endSessionNote()
       return
     }
     if (!this.settings.apiKey) {
@@ -362,6 +505,11 @@ export default class VozNotasPlugin extends Plugin {
         new Notice(t('notice.preparing'))
         await this.readVault()
       }
+      // Fresh transcript for the new session.
+      this.sessionLog = []
+      this.sessionConsulted.clear()
+      this.sessionStart = new Date()
+      this.sessionNotePath = null
       const view = await this.activateView()
       view?.clear()
       view?.setConnecting()
@@ -385,6 +533,7 @@ export default class VozNotasPlugin extends Plugin {
           INSERT_TEXT_TOOL,
           THINK_TOOL,
           REMEMBER_TOOL,
+          END_SESSION_TOOL,
         ],
         onToolCall: (name, args) => this.handleToolCall(name, args),
         onEvent: (e) => this.onRealtimeEvent(e),
@@ -405,28 +554,37 @@ export default class VozNotasPlugin extends Plugin {
   // Run a tool the model asked for, and return its result as a string.
   async handleToolCall(name: string, args: any): Promise<string> {
     console.log('tool call:', name, args)
+    if (name === 'end_session') {
+      // Don't close yet — let the model speak its goodbye first. We close when
+      // its audio finishes playing (or after a fallback timeout).
+      this.pendingEndSession = true
+      this.endFallbackTimer = window.setTimeout(() => {
+        if (this.session) void this.toggleVoice()
+      }, 10000)
+      return 'Closing after your goodbye.'
+    }
     if (name === 'search_notes') {
       const hits = this.searchNotes(String(args?.query ?? ''), 5)
-      hits.forEach((h) => this.getView()?.addConsulted(h.path))
+      hits.forEach((h) => this.noteConsulted(h.path))
       if (hits.length > 0) return hits.map((h) => `Note: ${h.path}\n${h.snippet}`).join('\n\n---\n\n')
       return this.notesCache?.length ? 'No matching notes found.' : 'Notes are still loading.'
     }
     if (name === 'read_note') {
       const p = String(args?.path ?? '')
-      this.getView()?.addConsulted(p)
+      this.noteConsulted(p)
       const content = await this.readNote(p)
       return content ?? 'Note not found.'
     }
     if (name === 'open_note') {
       const p = String(args?.path ?? '')
       const opened = await this.openNote(p)
-      if (opened) this.getView()?.addConsulted(p)
+      if (opened) this.noteConsulted(p)
       return opened ? 'Opened it.' : 'Note not found.'
     }
     if (name === 'get_active_note') {
       const file = this.app.workspace.getActiveFile()
       if (!file) return 'No note is open.'
-      this.getView()?.addConsulted(file.path)
+      this.noteConsulted(file.path)
       const content = (await this.app.vault.cachedRead(file)).slice(0, 6000)
       return `Path: ${file.path}\n\n${content}`
     }
@@ -724,7 +882,8 @@ export default class VozNotasPlugin extends Plugin {
     // Default spoken language = the settings language; the user can still switch
     // mid-conversation just by speaking another language.
     const lang = this.settings.language === 'es' ? 'Spanish' : 'English'
-    const langLine = `Speak ${lang} by default. If the user speaks another language, switch to it.`
+    const name = this.settings.assistantName?.trim() || 'Eco'
+    const langLine = `Your name is ${name} — that's what the user calls you. Speak ${lang} by default. If the user speaks another language, switch to it.`
     const base = `${INSTRUCTIONS}\n\n${langLine}`
 
     const path = this.settings.agentsFile?.trim() || 'AGENTS.md'
@@ -812,6 +971,29 @@ class VozNotasSettingTab extends PluginSettingTab {
             this.plugin.getView()?.refreshLang()
             this.display() // redraw so this pane updates to the new language
           })
+      })
+
+    new Setting(containerEl)
+      .setName(t('settings.assistantName.name'))
+      .setDesc(t('settings.assistantName.desc'))
+      .addText((text) => {
+        text
+          .setPlaceholder('Eco')
+          .setValue(this.plugin.settings.assistantName)
+          .onChange(async (value) => {
+            this.plugin.settings.assistantName = value.trim() || 'Eco'
+            await this.plugin.saveSettings()
+          })
+      })
+
+    new Setting(containerEl)
+      .setName(t('settings.saveSessions.name'))
+      .setDesc(t('settings.saveSessions.desc'))
+      .addToggle((tg) => {
+        tg.setValue(this.plugin.settings.saveSessions).onChange(async (value) => {
+          this.plugin.settings.saveSessions = value
+          await this.plugin.saveSettings()
+        })
       })
 
     new Setting(containerEl)

@@ -12,6 +12,7 @@ export class VozNotasView extends ItemView {
   private plugin: VozNotasPlugin
   private orbEl!: HTMLElement
   private statusEl!: HTMLElement
+  private stopEl!: HTMLElement
   private consultedLabelEl!: HTMLElement
   private transcriptEl!: HTMLElement
   private filesEl!: HTMLElement
@@ -50,8 +51,13 @@ export class VozNotasView extends ItemView {
     setIcon(badge, 'mic-off')
     // Click the orb to start a session, or mute/unmute while live.
     this.orbEl.onClickEvent(() => this.plugin.onOrbClick())
-    // Status line under the orb ("Press to connect", "Listening…", "Muted…").
-    this.statusEl = orbWrap.createDiv({ cls: 'vn-status' })
+    // Status line under the orb ("Press to connect", "Listening…", "Muted…"),
+    // with a hang-up button beside it (the orb click is taken by mute).
+    const statusRow = orbWrap.createDiv({ cls: 'vn-statusrow' })
+    this.statusEl = statusRow.createDiv({ cls: 'vn-status' })
+    this.stopEl = statusRow.createEl('button', { cls: 'vn-stop' })
+    setIcon(this.stopEl, 'phone-off')
+    this.stopEl.onClickEvent(() => void this.plugin.toggleVoice())
 
     this.transcriptEl = root.createDiv({ cls: 'vn-transcript' })
 
@@ -90,6 +96,7 @@ export class VozNotasView extends ItemView {
     this.orbEl.toggleClass('is-active', active)
     this.orbEl.toggleClass('is-muted', this.phase === 'muted')
     this.statusEl?.setText(t(`orb.${this.phase}`))
+    this.stopEl?.toggleClass('is-visible', active)
     // When not being driven by the meter, drop the inline scale so the orb
     // rests (idle) or freezes (muted) instead of holding its last size.
     if (this.phase !== 'live' && this.phase !== 'connecting') this.orbEl.style.transform = ''
@@ -124,6 +131,8 @@ export class VozNotasView extends ItemView {
   // Re-apply every user-facing string in the current language.
   refreshLang() {
     this.orbEl?.setAttr('aria-label', t('orb.aria'))
+    this.stopEl?.setAttr('aria-label', t('orb.stop'))
+    this.stopEl?.setAttr('title', t('orb.stop'))
     this.consultedLabelEl?.setText(t('panel.consulted'))
     this.applyPhase()
   }
