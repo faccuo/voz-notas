@@ -5,6 +5,8 @@ export interface VoiceSession {
   stop(): void
   setMuted(muted: boolean): void
   isMuted(): boolean
+  // Current audio loudness (0..1), max of your mic and the assistant's voice.
+  getLevel(): number
 }
 
 export interface ToolDef {
@@ -29,10 +31,46 @@ export async function startVoiceSession(
 ): Promise<VoiceSession> {
   const pc = new RTCPeerConnection()
 
-  // Play the audio OpenAI sends back.
+  // Audio metering: read loudness from both the mic and the assistant's voice
+  // so the UI can react to whoever is talking. Best-effort — never fatal.
+  let audioCtx: AudioContext | null = null
+  let micAnalyser: AnalyserNode | null = null
+  let remoteAnalyser: AnalyserNode | null = null
+  let meterBuf: Uint8Array<ArrayBuffer> | null = null
+  try {
+    audioCtx = new AudioContext()
+    micAnalyser = audioCtx.createAnalyser()
+    remoteAnalyser = audioCtx.createAnalyser()
+    micAnalyser.fftSize = 512
+    remoteAnalyser.fftSize = 512
+    meterBuf = new Uint8Array(new ArrayBuffer(micAnalyser.fftSize))
+  } catch {
+    /* Web Audio unavailable — getLevel() just returns 0. */
+  }
+  const rms = (analyser: AnalyserNode | null): number => {
+    if (!analyser || !meterBuf) return 0
+    analyser.getByteTimeDomainData(meterBuf)
+    let sum = 0
+    for (let i = 0; i < meterBuf.length; i++) {
+      const v = (meterBuf[i] - 128) / 128
+      sum += v * v
+    }
+    return Math.sqrt(sum / meterBuf.length)
+  }
+
+  // Play the audio OpenAI sends back (and tap it for metering).
   const audioEl = new Audio()
   audioEl.autoplay = true
-  pc.ontrack = (e) => (audioEl.srcObject = e.streams[0])
+  pc.ontrack = (e) => {
+    audioEl.srcObject = e.streams[0]
+    if (audioCtx && remoteAnalyser) {
+      try {
+        audioCtx.createMediaStreamSource(e.streams[0]).connect(remoteAnalyser)
+      } catch {
+        /* some engines refuse a WebRTC remote stream as a source; mic still meters */
+      }
+    }
+  }
 
   // Capture the mic and send it over the connection.
   // Echo cancellation stops the model from hearing its own voice and cutting itself off.
@@ -41,6 +79,13 @@ export async function startVoiceSession(
   })
   const micTracks = mic.getTracks()
   micTracks.forEach((track) => pc.addTrack(track, mic))
+  if (audioCtx && micAnalyser) {
+    try {
+      audioCtx.createMediaStreamSource(mic).connect(micAnalyser)
+    } catch {
+      /* ignore */
+    }
+  }
   let muted = false
 
   // Data channel: JSON events (session config, tool calls, transcripts).
@@ -121,6 +166,7 @@ export async function startVoiceSession(
     stop() {
       micTracks.forEach((track) => track.stop())
       pc.close()
+      void audioCtx?.close()
     },
     setMuted(m: boolean) {
       muted = m
@@ -129,6 +175,10 @@ export async function startVoiceSession(
     },
     isMuted() {
       return muted
+    },
+    getLevel() {
+      // A little gain so normal speech reaches a satisfying peak; clamp to 1.
+      return Math.min(1, Math.max(rms(micAnalyser), rms(remoteAnalyser)) * 2.4)
     },
   }
 }

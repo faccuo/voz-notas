@@ -346,7 +346,9 @@ export default class VozNotasPlugin extends Plugin {
     if (this.session) {
       this.session.stop()
       this.session = null
-      this.getView()?.setActive(false)
+      const view = this.getView()
+      view?.stopLevelMeter()
+      view?.setActive(false)
       new Notice(t('notice.ended'))
       return
     }
@@ -387,11 +389,15 @@ export default class VozNotasPlugin extends Plugin {
         onToolCall: (name, args) => this.handleToolCall(name, args),
         onEvent: (e) => this.onRealtimeEvent(e),
       })
-      this.getView()?.setActive(true)
+      const liveView = this.getView()
+      liveView?.setActive(true)
+      liveView?.startLevelMeter(() => this.session?.getLevel() ?? 0)
       new Notice(t('notice.connected'))
     } catch (e) {
       console.error(e)
-      this.getView()?.setActive(false)
+      const view = this.getView()
+      view?.stopLevelMeter()
+      view?.setActive(false)
       new Notice(t('notice.error', (e as Error).message))
     }
   }

@@ -19,6 +19,9 @@ export class VozNotasView extends ItemView {
   private consulted = new Set<string>()
   private pendingUser = new Map<string, HTMLElement>()
   private phase: Phase = 'idle'
+  private raf: number | null = null
+  private levelSource: (() => number) | null = null
+  private smooth = 0
 
   constructor(leaf: WorkspaceLeaf, plugin: VozNotasPlugin) {
     super(leaf)
@@ -87,6 +90,35 @@ export class VozNotasView extends ItemView {
     this.orbEl.toggleClass('is-active', active)
     this.orbEl.toggleClass('is-muted', this.phase === 'muted')
     this.statusEl?.setText(t(`orb.${this.phase}`))
+    // When not being driven by the meter, drop the inline scale so the orb
+    // rests (idle) or freezes (muted) instead of holding its last size.
+    if (this.phase !== 'live' && this.phase !== 'connecting') this.orbEl.style.transform = ''
+  }
+
+  // Drive the orb's size from live audio loudness (max of mic + assistant).
+  startLevelMeter(getLevel: () => number) {
+    this.levelSource = getLevel
+    if (this.raf != null) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    const tick = () => {
+      this.raf = requestAnimationFrame(tick)
+      const driving = this.phase === 'live' || this.phase === 'connecting'
+      if (!driving || !this.orbEl || reduce?.matches) return
+      const lvl = this.levelSource ? this.levelSource() : 0
+      this.smooth += (lvl - this.smooth) * 0.35 // ease toward the new level
+      const idle = 0.035 * Math.sin(performance.now() / 520) // gentle baseline breathing
+      const s = 1 + idle + this.smooth * 0.45
+      this.orbEl.style.transform = `scale(${s.toFixed(3)})`
+    }
+    this.raf = requestAnimationFrame(tick)
+  }
+
+  stopLevelMeter() {
+    if (this.raf != null) cancelAnimationFrame(this.raf)
+    this.raf = null
+    this.levelSource = null
+    this.smooth = 0
+    if (this.orbEl) this.orbEl.style.transform = ''
   }
 
   // Re-apply every user-facing string in the current language.
@@ -158,5 +190,9 @@ export class VozNotasView extends ItemView {
 
   private scroll() {
     this.transcriptEl.scrollTop = this.transcriptEl.scrollHeight
+  }
+
+  async onClose() {
+    this.stopLevelMeter()
   }
 }

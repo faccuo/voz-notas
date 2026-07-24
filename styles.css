@@ -53,7 +53,7 @@
 }
 .vn-orb.is-active {
   opacity: 1;
-  animation: vn-morph 3.6s ease-in-out infinite, vn-life 2.6s ease-in-out infinite;
+  animation: vn-morph 3.6s ease-in-out infinite;
 }
 .vn-orb.is-pulse::before {
   animation: vn-ring 0.55s ease-out;
@@ -85,11 +85,6 @@
   0%, 100% { border-radius: 63% 37% 58% 42% / 58% 42% 58% 42%; }
   33% { border-radius: 38% 62% 66% 34% / 55% 68% 32% 45%; }
   66% { border-radius: 58% 42% 34% 66% / 36% 46% 64% 58%; }
-}
-/* scale + gentle rotation together (one transform) → the drop churns, alive */
-@keyframes vn-life {
-  0%, 100% { transform: scale(1) rotate(0deg); }
-  50% { transform: scale(1.12) rotate(9deg); }
 }
 @keyframes vn-ring {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 45%, transparent); }
