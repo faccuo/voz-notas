@@ -90,5 +90,5 @@ updates the plugin in place.
 
 ## Status
 
-Early and evolving. Feedback on which tools and graph features would be most
-useful is very welcome — open an issue.
+I built this for myself and use it every day — it's early and evolving. If you
+use it and hit a rough edge or something's missing, open an issue.
