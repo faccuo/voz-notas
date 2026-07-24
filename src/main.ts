@@ -1,17 +1,21 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, prepareFuzzySearch, requestUrl } from 'obsidian'
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, prepareFuzzySearch, requestUrl } from 'obsidian'
 import { startVoiceSession, type VoiceSession, type ToolDef } from './core/voice'
 import { snippetAround, type Note } from './core/retrieval'
+import { VozNotasView, VIEW_TYPE } from './view'
+import { t, setLang, type Lang } from './i18n'
 
 interface VozNotasSettings {
   apiKey: string
   reasoningModel: string
   agentsFile: string
+  language: Lang
 }
 
 const DEFAULT_SETTINGS: VozNotasSettings = {
   apiKey: '',
   reasoningModel: 'gpt-5',
   agentsFile: 'AGENTS.md',
+  language: 'en',
 }
 
 const INSTRUCTIONS = `You are a voice assistant over the user's personal Obsidian notes (Markdown, linked with [[wikilinks]], tagged with #tags).
@@ -254,14 +258,20 @@ export default class VozNotasPlugin extends Plugin {
     this.addSettingTab(new VozNotasSettingTab(this.app, this))
 
     // Click the mic to start a voice session; click again to stop.
+    // (Mute lives on the orb inside the panel — click it to mute/unmute.)
     this.addRibbonIcon('mic', 'voz-notas', () => this.toggleVoice())
-
-    // Mute/unmute your mic during a session (so the model can answer uninterrupted).
-    this.addRibbonIcon('mic-off', 'voz-notas: mute/unmute', () => this.toggleMute())
     this.addCommand({
       id: 'toggle-mute',
       name: 'Toggle mute',
       callback: () => this.toggleMute(),
+    })
+
+    // The side panel (transcript + consulted notes + orb).
+    this.registerView(VIEW_TYPE, (leaf) => new VozNotasView(leaf, this))
+    this.addCommand({
+      id: 'open-panel',
+      name: 'Open panel',
+      callback: () => this.activateView(),
     })
 
     // Warm the notes cache once the vault is ready. (onload runs before the file
@@ -274,34 +284,85 @@ export default class VozNotasPlugin extends Plugin {
     this.session = null
   }
 
+  // --- Side panel ---
+  getView(): VozNotasView | null {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE)
+    return leaves.length ? (leaves[0].view as VozNotasView) : null
+  }
+
+  async activateView(): Promise<VozNotasView> {
+    let leaf: WorkspaceLeaf | null = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0] ?? null
+    if (!leaf) {
+      leaf = this.app.workspace.getRightLeaf(false)
+      await leaf?.setViewState({ type: VIEW_TYPE, active: true })
+    }
+    if (leaf) this.app.workspace.revealLeaf(leaf)
+    return leaf?.view as VozNotasView
+  }
+
+  // Route realtime events to the panel (transcript both sides + orb pulse).
+  onRealtimeEvent(event: any) {
+    const view = this.getView()
+    if (!view) return
+    switch (event.type) {
+      case 'input_audio_buffer.speech_started':
+      case 'response.output_audio.delta':
+        view.pulse()
+        break
+      case 'conversation.item.added':
+      case 'conversation.item.created':
+        if (event.item?.role === 'user' && event.item?.id) view.addUserPlaceholder(event.item.id)
+        break
+      case 'response.output_audio_transcript.delta':
+        view.appendAssistant(event.delta ?? '')
+        view.pulse()
+        break
+      case 'response.output_audio_transcript.done':
+        view.finishAssistant()
+        break
+      case 'conversation.item.input_audio_transcription.completed':
+        view.fillUser(event.item_id, event.transcript ?? '')
+        break
+    }
+  }
+
+  // Click the orb: start a session if idle, otherwise mute/unmute.
+  onOrbClick() {
+    if (this.session) this.toggleMute()
+    else void this.toggleVoice()
+  }
+
   toggleMute() {
     if (!this.session) {
-      new Notice('Start a voice session first.')
+      new Notice(t('notice.startFirst'))
       return
     }
     const next = !this.session.isMuted()
     this.session.setMuted(next)
-    new Notice(next ? 'Muted 🔇' : 'Unmuted 🎙️')
+    this.getView()?.setMuted(next)
   }
 
   async toggleVoice() {
     if (this.session) {
       this.session.stop()
       this.session = null
-      new Notice('Voice session ended.')
+      this.getView()?.setActive(false)
+      new Notice(t('notice.ended'))
       return
     }
     if (!this.settings.apiKey) {
-      new Notice('Set your OpenAI API key in voz-notas settings first.')
+      new Notice(t('notice.setKey'))
       return
     }
     try {
       // Build the note index BEFORE connecting, so in-session search is pure in-memory.
       if (!this.notesCache || this.notesCache.length === 0) {
-        new Notice('Preparing your notes…')
+        new Notice(t('notice.preparing'))
         await this.readVault()
       }
-      new Notice('Connecting…')
+      const view = await this.activateView()
+      view?.clear()
+      view?.setConnecting()
       const token = await this.getEphemeralToken()
       this.session = await startVoiceSession((offerSdp) => this.postSdp(offerSdp, token), {
         instructions: await this.getInstructions(),
@@ -324,11 +385,14 @@ export default class VozNotasPlugin extends Plugin {
           REMEMBER_TOOL,
         ],
         onToolCall: (name, args) => this.handleToolCall(name, args),
+        onEvent: (e) => this.onRealtimeEvent(e),
       })
-      new Notice('Connected — talk to your notes!')
+      this.getView()?.setActive(true)
+      new Notice(t('notice.connected'))
     } catch (e) {
       console.error(e)
-      new Notice('Voice error: ' + (e as Error).message)
+      this.getView()?.setActive(false)
+      new Notice(t('notice.error', (e as Error).message))
     }
   }
 
@@ -337,20 +401,26 @@ export default class VozNotasPlugin extends Plugin {
     console.log('tool call:', name, args)
     if (name === 'search_notes') {
       const hits = this.searchNotes(String(args?.query ?? ''), 5)
+      hits.forEach((h) => this.getView()?.addConsulted(h.path))
       if (hits.length > 0) return hits.map((h) => `Note: ${h.path}\n${h.snippet}`).join('\n\n---\n\n')
       return this.notesCache?.length ? 'No matching notes found.' : 'Notes are still loading.'
     }
     if (name === 'read_note') {
-      const content = await this.readNote(String(args?.path ?? ''))
+      const p = String(args?.path ?? '')
+      this.getView()?.addConsulted(p)
+      const content = await this.readNote(p)
       return content ?? 'Note not found.'
     }
     if (name === 'open_note') {
-      const opened = await this.openNote(String(args?.path ?? ''))
+      const p = String(args?.path ?? '')
+      const opened = await this.openNote(p)
+      if (opened) this.getView()?.addConsulted(p)
       return opened ? 'Opened it.' : 'Note not found.'
     }
     if (name === 'get_active_note') {
       const file = this.app.workspace.getActiveFile()
       if (!file) return 'No note is open.'
+      this.getView()?.addConsulted(file.path)
       const content = (await this.app.vault.cachedRead(file)).slice(0, 6000)
       return `Path: ${file.path}\n\n${content}`
     }
@@ -645,15 +715,21 @@ export default class VozNotasPlugin extends Plugin {
 
   // Merge the base instructions (in code) with the user's AGENTS.md from the vault, if present.
   async getInstructions(): Promise<string> {
+    // Default spoken language = the settings language; the user can still switch
+    // mid-conversation just by speaking another language.
+    const lang = this.settings.language === 'es' ? 'Spanish' : 'English'
+    const langLine = `Speak ${lang} by default. If the user speaks another language, switch to it.`
+    const base = `${INSTRUCTIONS}\n\n${langLine}`
+
     const path = this.settings.agentsFile?.trim() || 'AGENTS.md'
     const file = this.app.vault.getAbstractFileByPath(path)
     if (file instanceof TFile) {
       const userInstructions = (await this.app.vault.cachedRead(file)).trim()
       if (userInstructions) {
-        return `${INSTRUCTIONS}\n\n--- User instructions (from ${path}) ---\n${userInstructions}`
+        return `${base}\n\n--- User instructions (from ${path}) ---\n${userInstructions}`
       }
     }
-    return INSTRUCTIONS
+    return base
   }
 
   // Mint a short-lived ephemeral token using the user's key.
@@ -670,7 +746,10 @@ export default class VozNotasPlugin extends Plugin {
         session: {
           type: 'realtime',
           model: 'gpt-realtime-2.1-mini',
-          audio: { output: { voice: 'marin' } },
+          audio: {
+            input: { transcription: { model: 'whisper-1' } }, // so we can show what you said
+            output: { voice: 'marin' },
+          },
         },
       }),
     })
@@ -693,9 +772,11 @@ export default class VozNotasPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData())
+    setLang(this.settings.language)
   }
 
   async saveSettings() {
+    setLang(this.settings.language)
     await this.saveData(this.settings)
   }
 }
@@ -711,6 +792,21 @@ class VozNotasSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this
     containerEl.empty()
+
+    new Setting(containerEl)
+      .setName(t('settings.language.name'))
+      .setDesc(t('settings.language.desc'))
+      .addDropdown((dd) => {
+        dd.addOption('en', 'English')
+          .addOption('es', 'Español')
+          .setValue(this.plugin.settings.language)
+          .onChange(async (value) => {
+            this.plugin.settings.language = value as Lang
+            await this.plugin.saveSettings()
+            this.plugin.getView()?.refreshLang()
+            this.display() // redraw so this pane updates to the new language
+          })
+      })
 
     new Setting(containerEl)
       .setName('OpenAI API key')

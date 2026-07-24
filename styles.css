@@ -1,0 +1,162 @@
+.vn-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  height: 100%;
+}
+
+.vn-orbwrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 8px;
+}
+.vn-status {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.vn-orb {
+  position: relative;
+  cursor: pointer;
+  width: 76px;
+  height: 76px;
+  border-radius: 60% 40% 55% 45% / 55% 45% 55% 45%;
+  background: radial-gradient(
+    circle at 34% 30%,
+    var(--interactive-accent),
+    color-mix(in srgb, #e0466b 50%, var(--interactive-accent)) 72%,
+    #e0466b
+  );
+  box-shadow: 0 0 38px -4px color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+}
+/* gloss highlight */
+.vn-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.5), transparent 42%);
+}
+/* pulse ring on voice activity — glow only, so it doesn't fight the morph */
+.vn-orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 0%, transparent);
+}
+.vn-orb.is-active {
+  opacity: 1;
+  animation: vn-morph 3.6s ease-in-out infinite, vn-life 2.6s ease-in-out infinite;
+}
+.vn-orb.is-pulse::before {
+  animation: vn-ring 0.55s ease-out;
+}
+/* crossed-out mic badge, above the gloss */
+.vn-orb-badge {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none;
+  place-items: center;
+  color: var(--text-on-accent);
+  pointer-events: none;
+}
+.vn-orb-badge svg {
+  width: 28px;
+  height: 28px;
+}
+/* muted: stop the life, dim, desaturate, show the badge (must win over is-active) */
+.vn-orb.is-muted {
+  animation: none;
+  opacity: 0.5;
+  filter: grayscale(0.65);
+}
+.vn-orb.is-muted .vn-orb-badge {
+  display: grid;
+}
+@keyframes vn-morph {
+  0%, 100% { border-radius: 63% 37% 58% 42% / 58% 42% 58% 42%; }
+  33% { border-radius: 38% 62% 66% 34% / 55% 68% 32% 45%; }
+  66% { border-radius: 58% 42% 34% 66% / 36% 46% 64% 58%; }
+}
+/* scale + gentle rotation together (one transform) → the drop churns, alive */
+@keyframes vn-life {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.12) rotate(9deg); }
+}
+@keyframes vn-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 16px color-mix(in srgb, var(--interactive-accent) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-orb.is-active { animation: none; }
+  .vn-orb.is-pulse::before { animation: none; }
+}
+
+.vn-transcript {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--font-ui-small);
+}
+.vn-turn {
+  padding: 6px 10px;
+  border-radius: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.vn-user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-bottom-right-radius: 3px;
+}
+.vn-assistant {
+  align-self: flex-start;
+  max-width: 92%;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border-bottom-left-radius: 3px;
+}
+.vn-turn.vn-pending {
+  opacity: 0.5;
+}
+
+.vn-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.vn-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 30%;
+  overflow-y: auto;
+}
+.vn-file {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vn-file:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}

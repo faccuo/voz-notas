@@ -19,6 +19,8 @@ export interface VoiceConfig {
   tools?: ToolDef[]
   // Run a tool the model asked for; return its result as a string.
   onToolCall?: (name: string, args: any) => Promise<string>
+  // Fired for every event on the data channel (transcripts, activity, etc.).
+  onEvent?: (event: any) => void
 }
 
 export async function startVoiceSession(
@@ -79,6 +81,7 @@ export async function startVoiceSession(
 
   dc.addEventListener('message', async (e) => {
     const event = JSON.parse(e.data)
+    config.onEvent?.(event)
 
     if (event.type === 'response.created') responseActive = true
     if (event.type === 'response.done') {
