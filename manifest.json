@@ -1,9 +1,10 @@
 {
   "id": "voz-notas",
-  "name": "voz-notas",
-  "version": "0.0.1",
+  "name": "Voz-notas",
+  "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Talk to your notes by voice.",
-  "author": "Fernando",
+  "description": "Talk to your notes by voice — a hands-free voice assistant that searches, reads and writes your vault.",
+  "author": "Fernando Abellán",
+  "authorUrl": "https://github.com/faccuo",
   "isDesktopOnly": true
 }
