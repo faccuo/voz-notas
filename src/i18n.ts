@@ -26,9 +26,11 @@ const STRINGS: Record<Lang, Dict> = {
     'settings.language.desc': 'Language of the plugin interface.',
     'settings.saveSessions.name': 'Save session transcripts',
     'settings.saveSessions.desc':
-      'Save each voice session as a note in "voz-notas/sessions". The assistant can search them — they become its memory of past conversations.',
+      "Save each voice session as a note in the assistant folder's \"sessions\" subfolder. The assistant can search them — they become its memory of past conversations.",
     'settings.assistantName.name': 'Assistant name',
     'settings.assistantName.desc': 'What the assistant is called — its identity when you talk, and its label in session notes.',
+    'settings.notesFolder.name': 'Assistant folder',
+    'settings.notesFolder.desc': 'Vault folder where the assistant creates new notes; session transcripts go in its "sessions" subfolder.',
   },
   es: {
     'orb.idle': 'Pulsa para conectar',
@@ -50,9 +52,11 @@ const STRINGS: Record<Lang, Dict> = {
     'settings.language.desc': 'Idioma de la interfaz del plugin.',
     'settings.saveSessions.name': 'Guardar transcripciones de sesión',
     'settings.saveSessions.desc':
-      'Guarda cada sesión de voz como nota en "voz-notas/sessions". El asistente puede buscarlas — son su memoria de conversaciones pasadas.',
+      'Guarda cada sesión de voz como nota en la subcarpeta "sessions" de la carpeta del asistente. El asistente puede buscarlas — son su memoria de conversaciones pasadas.',
     'settings.assistantName.name': 'Nombre del asistente',
     'settings.assistantName.desc': 'Cómo se llama el asistente — su identidad al hablar y su etiqueta en las notas de sesión.',
+    'settings.notesFolder.name': 'Carpeta del asistente',
+    'settings.notesFolder.desc': 'Carpeta del vault donde el asistente crea notas nuevas; las transcripciones van en su subcarpeta "sessions".',
   },
 }
 

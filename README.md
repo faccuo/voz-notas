@@ -33,6 +33,13 @@ Start a session and just talk. The assistant can:
   stronger reasoning model.
 - **Learn your preferences** — tell it "from now on, always…" and it appends the
   rule to your `AGENTS.md`, which is merged into its instructions next time.
+- **Remember conversations** — each session is saved incrementally as a plain
+  Markdown note (in the assistant folder's `sessions` subfolder), with wikilinks
+  to the notes it consulted. Sessions are searchable like any note, so past
+  conversations become its memory — ask "what did we talk about yesterday?".
+- **Hang up by voice** — say goodbye and the session closes itself after its
+  reply. There's also a hang-up button, and a status-bar indicator whenever the
+  mic is live, even with the panel closed.
 
 The side panel shows a voice orb that reacts to whoever is talking, the live
 transcript (both sides), and the list of notes it consulted (clickable).
@@ -98,7 +105,10 @@ conversation just by speaking another language.
 
 | Setting | What it does |
 |---|---|
-| **Language** | Language of the plugin interface (English / Español). |
+| **Language** | Language of the plugin interface and the default spoken language (English / Español). |
+| **Assistant name** | What the assistant is called (default `Eco`). |
+| **Assistant folder** | Where it creates new notes and keeps session transcripts (default `Eco`). |
+| **Save session transcripts** | Toggle saving sessions as notes (its memory). |
 | **OpenAI API key** | Stored locally; only sent to OpenAI to start a session. |
 | **Reasoning model** | Stronger model the "think" tool uses for opinions / analysis. |
 | **Instructions file** | A Markdown file (default `AGENTS.md`) merged into the assistant's instructions. |

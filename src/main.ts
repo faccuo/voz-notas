@@ -11,6 +11,7 @@ interface VozNotasSettings {
   language: Lang
   saveSessions: boolean
   assistantName: string
+  notesFolder: string
 }
 
 const DEFAULT_SETTINGS: VozNotasSettings = {
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   language: 'en',
   saveSessions: true,
   assistantName: 'Eco',
+  notesFolder: 'Eco',
 }
 
 const INSTRUCTIONS = `You are a voice assistant over the user's personal Obsidian notes (Markdown, linked with [[wikilinks]], tagged with #tags).
@@ -56,7 +58,6 @@ Behaviour:
 - If they ask to open/show a note, call open_note.
 - For "related ideas" or "what links here", use get_links. For tags, use list_tags / find_notes_by_tag.
 - When the user asks you to remember a preference or change how you behave from now on (e.g. "when I talk about writing, don't give creative ideas"), confirm briefly, then call remember_rule with a concise rule.
-- Past sessions are saved as notes under "voz-notas/sessions" — when the user refers to an earlier conversation ("what did we talk about yesterday?"), search or list that folder.
 - When the user says goodbye or asks to end the session ("adiós", "cierra la sesión", "we're done"), call end_session and then say a SHORT goodbye — the session closes when you finish speaking. No confirmation needed.
 - Before any write (create_note, append_to_note, insert_text, remember_rule): ask a SHORT confirmation like "¿lo hago?" — do NOT read the whole text back. Only write after they say yes.
 Always use the exact path from search_notes. Respond in the user's language, briefly and conversationally.
@@ -257,10 +258,6 @@ const END_SESSION_TOOL: ToolDef = {
   parameters: { type: 'object', properties: {}, required: [] },
 }
 
-const NEW_NOTES_FOLDER = 'voz-notas'
-// Session transcripts live in the vault → search_notes indexes them → the
-// assistant gets memory of past conversations for free.
-const SESSIONS_FOLDER = 'voz-notas/sessions'
 
 export default class VozNotasPlugin extends Plugin {
   settings!: VozNotasSettings // set in onload() via loadSettings()
@@ -413,6 +410,16 @@ export default class VozNotasPlugin extends Plugin {
     }
   }
 
+  // Where the assistant keeps its things: new notes in <folder>, session
+  // transcripts (its memory) in <folder>/sessions. Defaults to "Eco".
+  getNotesFolder(): string {
+    return this.settings.notesFolder?.trim().replace(/\/+$/, '') || 'Eco'
+  }
+
+  getSessionsFolder(): string {
+    return `${this.getNotesFolder()}/sessions`
+  }
+
   // Reflect the call state in the status bar (red pulsing dot = mic live,
   // grey still dot = muted, hidden = no call).
   updateStatusBar() {
@@ -469,12 +476,12 @@ export default class VozNotasPlugin extends Plugin {
       ].join('\n')
 
       if (!this.sessionNotePath) {
-        if (!this.app.vault.getAbstractFileByPath(SESSIONS_FOLDER)) {
-          await this.app.vault.createFolder(SESSIONS_FOLDER).catch(() => {})
+        if (!this.app.vault.getAbstractFileByPath(this.getSessionsFolder())) {
+          await this.app.vault.createFolder(this.getSessionsFolder()).catch(() => {})
         }
-        let path = `${SESSIONS_FOLDER}/${day} ${time}.md`
+        let path = `${this.getSessionsFolder()}/${day} ${time}.md`
         let n = 1
-        while (this.app.vault.getAbstractFileByPath(path)) path = `${SESSIONS_FOLDER}/${day} ${time} (${++n}).md`
+        while (this.app.vault.getAbstractFileByPath(path)) path = `${this.getSessionsFolder()}/${day} ${time} (${++n}).md`
         await this.app.vault.create(path, body)
         this.sessionNotePath = path
       } else {
@@ -673,13 +680,13 @@ export default class VozNotasPlugin extends Plugin {
 
   // Create a new note in the fixed folder. Non-destructive: never overwrites an existing note.
   async createNote(title: string, content: string): Promise<string | null> {
-    if (!this.app.vault.getAbstractFileByPath(NEW_NOTES_FOLDER)) {
-      await this.app.vault.createFolder(NEW_NOTES_FOLDER).catch(() => {})
+    if (!this.app.vault.getAbstractFileByPath(this.getNotesFolder())) {
+      await this.app.vault.createFolder(this.getNotesFolder()).catch(() => {})
     }
     const safe = (title || 'Untitled').replace(/[\\/:*?"<>|]/g, ' ').trim() || 'Untitled'
-    let path = `${NEW_NOTES_FOLDER}/${safe}.md`
+    let path = `${this.getNotesFolder()}/${safe}.md`
     let n = 1
-    while (this.app.vault.getAbstractFileByPath(path)) path = `${NEW_NOTES_FOLDER}/${safe} ${++n}.md`
+    while (this.app.vault.getAbstractFileByPath(path)) path = `${this.getNotesFolder()}/${safe} ${++n}.md`
     const file = await this.app.vault.create(path, content)
     await this.app.workspace.getLeaf(false).openFile(file) // open the new note
     return file.path
@@ -926,7 +933,8 @@ export default class VozNotasPlugin extends Plugin {
     const lang = this.settings.language === 'es' ? 'Spanish' : 'English'
     const name = this.settings.assistantName?.trim() || 'Eco'
     const langLine = `Your name is ${name} — that's what the user calls you. Speak ${lang} by default. If the user speaks another language, switch to it.`
-    const base = `${INSTRUCTIONS}\n\n${langLine}`
+    const foldersLine = `New notes you create go in "${this.getNotesFolder()}". Past sessions are saved as notes under "${this.getSessionsFolder()}" — when the user refers to an earlier conversation ("what did we talk about yesterday?"), search or list that folder.`
+    const base = `${INSTRUCTIONS}\n\n${langLine}\n${foldersLine}`
 
     const path = this.settings.agentsFile?.trim() || 'AGENTS.md'
     const file = this.app.vault.getAbstractFileByPath(path)
@@ -1024,6 +1032,19 @@ class VozNotasSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.assistantName)
           .onChange(async (value) => {
             this.plugin.settings.assistantName = value.trim() || 'Eco'
+            await this.plugin.saveSettings()
+          })
+      })
+
+    new Setting(containerEl)
+      .setName(t('settings.notesFolder.name'))
+      .setDesc(t('settings.notesFolder.desc'))
+      .addText((text) => {
+        text
+          .setPlaceholder('Eco')
+          .setValue(this.plugin.settings.notesFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.notesFolder = value.trim() || 'Eco'
             await this.plugin.saveSettings()
           })
       })
