@@ -16,13 +16,29 @@ export interface ToolDef {
   parameters: object
 }
 
+// Arguments the model passes to a tool call (parsed JSON object).
+export type ToolArgs = Record<string, unknown>
+
+// The slice of the OpenAI Realtime event protocol we actually consume.
+export interface RealtimeEvent {
+  type: string
+  delta?: string
+  transcript?: string
+  item_id?: string
+  item?: { id?: string; role?: string }
+  name?: string
+  arguments?: string
+  call_id?: string
+  error?: unknown
+}
+
 export interface VoiceConfig {
   instructions?: string
   tools?: ToolDef[]
   // Run a tool the model asked for; return its result as a string.
-  onToolCall?: (name: string, args: any) => Promise<string>
+  onToolCall?: (name: string, args: ToolArgs) => Promise<string>
   // Fired for every event on the data channel (transcripts, activity, etc.).
-  onEvent?: (event: any) => void
+  onEvent?: (event: RealtimeEvent) => void
 }
 
 export async function startVoiceSession(
@@ -125,7 +141,7 @@ export async function startVoiceSession(
   }
 
   const onMessage = async (e: MessageEvent) => {
-    const event = JSON.parse(e.data)
+    const event = JSON.parse(String(e.data)) as RealtimeEvent
     config.onEvent?.(event)
 
     if (event.type === 'response.created') responseActive = true
@@ -138,8 +154,8 @@ export async function startVoiceSession(
       // The model wants to run a tool. Run it, return the result, then ask it to continue.
       let output = ''
       try {
-        const args = JSON.parse(event.arguments || '{}')
-        output = config.onToolCall ? await config.onToolCall(event.name, args) : ''
+        const args = JSON.parse(event.arguments || '{}') as ToolArgs
+        output = config.onToolCall ? await config.onToolCall(event.name ?? '', args) : ''
       } catch (err) {
         output = 'Error: ' + (err as Error).message
       }

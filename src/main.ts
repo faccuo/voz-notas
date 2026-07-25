@@ -1,5 +1,5 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, prepareFuzzySearch, requestUrl } from 'obsidian'
-import { startVoiceSession, type VoiceSession, type ToolDef } from './core/voice'
+import { startVoiceSession, type VoiceSession, type ToolDef, type ToolArgs, type RealtimeEvent } from './core/voice'
 import { snippetAround, type Note } from './core/retrieval'
 import { VozNotasView, VIEW_TYPE } from './view'
 import { t, setLang, type Lang } from './i18n'
@@ -348,7 +348,7 @@ export default class VozNotasPlugin extends Plugin {
   }
 
   // Route realtime events to the session log (memory) and the panel (UI).
-  onRealtimeEvent(event: any) {
+  onRealtimeEvent(event: RealtimeEvent) {
     // Deferred hang-up: the model called end_session and has now finished
     // speaking its goodbye — close for real.
     if (this.pendingEndSession && event.type === 'output_audio_buffer.stopped') {
@@ -365,9 +365,10 @@ export default class VozNotasPlugin extends Plugin {
     switch (event.type) {
       case 'conversation.item.added':
       case 'conversation.item.created':
-        if (event.item?.role === 'user' && event.item?.id) {
-          if (!this.sessionLog.some((e) => e.id === event.item.id)) {
-            this.sessionLog.push({ role: 'user', id: event.item.id, text: '' })
+        if (event.item?.role === 'user' && event.item.id) {
+          const id = event.item.id
+          if (!this.sessionLog.some((e) => e.id === id)) {
+            this.sessionLog.push({ role: 'user', id, text: '' })
           }
         }
         break
@@ -404,7 +405,7 @@ export default class VozNotasPlugin extends Plugin {
         view.finishAssistant()
         break
       case 'conversation.item.input_audio_transcription.completed':
-        view.fillUser(event.item_id, event.transcript ?? '')
+        view.fillUser(event.item_id ?? '', event.transcript ?? '')
         break
     }
   }
@@ -597,7 +598,7 @@ export default class VozNotasPlugin extends Plugin {
   }
 
   // Run a tool the model asked for, and return its result as a string.
-  async handleToolCall(name: string, args: any): Promise<string> {
+  async handleToolCall(name: string, args: ToolArgs): Promise<string> {
     if (name === 'end_session') {
       // Don't close yet — let the model speak its goodbye first. We close when
       // its audio finishes playing (or after a fallback timeout).
@@ -656,7 +657,7 @@ export default class VozNotasPlugin extends Plugin {
       return ok ? 'Inserted it.' : 'No editor is active (open a note first).'
     }
     if (name === 'think') {
-      const paths = Array.isArray(args?.paths) ? (args.paths as string[]) : []
+      const paths = Array.isArray(args?.paths) ? args.paths.map(String) : []
       return await this.think(String(args?.question ?? ''), paths)
     }
     if (name === 'remember_rule') {
@@ -719,7 +720,7 @@ export default class VozNotasPlugin extends Plugin {
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cache = this.app.metadataCache.getFileCache(file)
       cache?.tags?.forEach((t) => set.add(t.tag))
-      const fm = cache?.frontmatter?.tags
+      const fm: unknown = cache?.frontmatter?.tags
       if (Array.isArray(fm)) fm.forEach((t) => set.add('#' + String(t).replace(/^#/, '')))
     }
     return [...set].sort().join(', ') || 'No tags.'
@@ -731,7 +732,7 @@ export default class VozNotasPlugin extends Plugin {
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cache = this.app.metadataCache.getFileCache(file)
       const tags = (cache?.tags ?? []).map((t) => t.tag.toLowerCase())
-      const fm = cache?.frontmatter?.tags
+      const fm: unknown = cache?.frontmatter?.tags
       const fmTags = Array.isArray(fm) ? fm.map((t) => '#' + String(t).replace(/^#/, '').toLowerCase()) : []
       if (tags.includes(want) || fmTags.includes(want)) out.push(file.path)
       if (out.length >= limit) break
@@ -778,7 +779,8 @@ export default class VozNotasPlugin extends Plugin {
           ],
         }),
       })
-      const answer = res.json?.choices?.[0]?.message?.content
+      const data = res.json as { choices?: Array<{ message?: { content?: unknown } }> } | undefined
+      const answer = data?.choices?.[0]?.message?.content
       return typeof answer === 'string' && answer.trim() ? answer : 'Could not get a reasoned answer.'
     } catch (e) {
       console.error('think error:', e)
@@ -957,7 +959,9 @@ export default class VozNotasPlugin extends Plugin {
         },
       }),
     })
-    return res.json.value
+    const data = res.json as { value?: unknown }
+    if (typeof data.value !== 'string') throw new Error('No session token in the OpenAI response.')
+    return data.value
   }
 
   // Signaling: send our offer SDP, return OpenAI's answer SDP. (Obsidian-specific: requestUrl.)
@@ -975,7 +979,8 @@ export default class VozNotasPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData())
+    const stored = (await this.loadData()) as Partial<VozNotasSettings> | null
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored)
     setLang(this.settings.language)
   }
 

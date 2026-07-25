@@ -1,7 +1,7 @@
 {
   "id": "voz-notas",
   "name": "Voz-notas",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minAppVersion": "1.7.2",
   "description": "Talk to your notes by voice — a hands-free voice assistant that searches, reads and writes your vault.",
   "author": "Fernando Abellán",
