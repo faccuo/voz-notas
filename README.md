@@ -10,12 +10,7 @@ So I built it. I'm its first user; I run it every day.
 
 > _"voz-notas" is Spanish for "voice-notes"._
 
-<!-- Record a short clip of the panel while you talk to your notes and drop it here:
-![demo](docs/demo.gif)
--->
-
-> 🎥 **Demo GIF coming** — the liquid orb reacts to your voice while the transcript
-> and the notes it consulted show up beside it.
+![Talking to your notes by voice: the orb reacts while the transcript and consulted notes appear in the side panel](docs/demo.gif)
 
 ---
 
