@@ -6,7 +6,7 @@ your vault, and answers out loud. Powered by the OpenAI Realtime API.
 
 I wanted to talk to my notes instead of typing at them — ask a question while
 pacing around, have something read back, dictate without touching the keyboard.
-So I built it. I'm its first user; I run it every day.
+So I built it.
 
 > _"voz-notas" is Spanish for "voice-notes"._
 
@@ -120,5 +120,5 @@ updates the plugin in place.
 
 ## Status
 
-I built this for myself and use it every day — it's early and evolving. If you
-use it and hit a rough edge or something's missing, open an issue.
+I built this for myself — it's early and evolving. If you use it and hit a
+rough edge or something's missing, open an issue.
