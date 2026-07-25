@@ -343,7 +343,7 @@ export default class VozNotasPlugin extends Plugin {
       leaf = this.app.workspace.getRightLeaf(false)
       await leaf?.setViewState({ type: VIEW_TYPE, active: true })
     }
-    if (leaf) this.app.workspace.revealLeaf(leaf)
+    if (leaf) await this.app.workspace.revealLeaf(leaf)
     return leaf?.view as VozNotasView
   }
 
@@ -598,7 +598,6 @@ export default class VozNotasPlugin extends Plugin {
 
   // Run a tool the model asked for, and return its result as a string.
   async handleToolCall(name: string, args: any): Promise<string> {
-    console.log('tool call:', name, args)
     if (name === 'end_session') {
       // Don't close yet — let the model speak its goodbye first. We close when
       // its audio finishes playing (or after a fallback timeout).
@@ -859,7 +858,6 @@ export default class VozNotasPlugin extends Plugin {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
     const notes = this.notesCache ?? []
     if (terms.length === 0 || notes.length === 0) return []
-    const t0 = Date.now()
     const scored: { note: Note; score: number; at: number }[] = []
     for (const note of notes) {
       const lower = note.content.toLowerCase()
@@ -875,7 +873,6 @@ export default class VozNotasPlugin extends Plugin {
       if (score > 0) scored.push({ note, score, at: at < 0 ? 0 : at })
     }
     scored.sort((a, b) => b.score - a.score) // more matched terms = better
-    console.log(`search: ${scored.length} matches in ${Date.now() - t0}ms`)
     return scored.slice(0, limit).map(({ note, at }) => ({
       path: note.path,
       snippet: snippetAround(note.content, at),
@@ -888,7 +885,6 @@ export default class VozNotasPlugin extends Plugin {
     if (this.notesCache && this.notesCache.length > 0) return this.notesCache
     if (this.notesReadPromise) return this.notesReadPromise
     this.notesReadPromise = (async () => {
-      const t0 = Date.now()
       const files = this.app.vault.getMarkdownFiles()
       const notes = await Promise.all(
         files.map(async (file) => ({
@@ -898,7 +894,6 @@ export default class VozNotasPlugin extends Plugin {
       )
       this.notesCache = notes
       this.notesReadPromise = null
-      console.log(`voz-notas: read ${notes.length} notes in ${Date.now() - t0}ms`)
       return notes
     })()
     return this.notesReadPromise
@@ -909,16 +904,14 @@ export default class VozNotasPlugin extends Plugin {
     const clean = rule.trim()
     if (!clean) return 'Empty rule.'
     const path = this.settings.agentsFile?.trim() || 'AGENTS.md'
-    let file = this.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) {
-      file = await this.app.vault.create(path, '# Assistant instructions\n')
-    }
-    const current = await this.app.vault.cachedRead(file as TFile)
+    const existing = this.app.vault.getAbstractFileByPath(path)
+    const file = existing instanceof TFile ? existing : await this.app.vault.create(path, '# Assistant instructions\n')
+    const current = await this.app.vault.cachedRead(file)
     if (current.toLowerCase().includes(clean.toLowerCase())) return 'Already remembered.'
     const marker = '## Learned preferences'
     let next = current.includes(marker) ? current : `${current.trimEnd()}\n\n${marker}\n`
     next = `${next.trimEnd()}\n- ${clean}\n`
-    await this.app.vault.modify(file as TFile, next)
+    await this.app.vault.modify(file, next)
     return 'Remembered — it will apply next session.'
   }
 

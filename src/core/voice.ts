@@ -124,7 +124,7 @@ export async function startVoiceSession(
     }
   }
 
-  dc.addEventListener('message', async (e) => {
+  const onMessage = async (e: MessageEvent) => {
     const event = JSON.parse(e.data)
     config.onEvent?.(event)
 
@@ -153,7 +153,8 @@ export async function startVoiceSession(
     if (event.type === 'error') {
       console.error('realtime error:', JSON.stringify(event.error ?? event, null, 2))
     }
-  })
+  }
+  dc.addEventListener('message', (e) => void onMessage(e))
 
   // Offer -> (signaling) -> answer.
   const offer = await pc.createOffer()

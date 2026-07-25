@@ -127,7 +127,7 @@ export class VozNotasView extends ItemView {
     this.stopEl?.toggleClass('is-visible', active)
     // When not being driven by the meter, drop the inline scale so the orb
     // rests (idle) or freezes (muted) instead of holding its last size.
-    if (this.phase !== 'live' && this.phase !== 'connecting') this.orbEl.style.transform = ''
+    if (this.phase !== 'live' && this.phase !== 'connecting') this.orbEl.setCssStyles({ transform: '' })
   }
 
   // Drive the orb's size from live audio loudness (max of mic + assistant).
@@ -136,24 +136,24 @@ export class VozNotasView extends ItemView {
     if (this.raf != null) return
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')
     const tick = () => {
-      this.raf = requestAnimationFrame(tick)
+      this.raf = window.requestAnimationFrame(tick)
       const driving = this.phase === 'live' || this.phase === 'connecting'
       if (!driving || !this.orbEl || reduce?.matches) return
       const lvl = this.levelSource ? this.levelSource() : 0
       this.smooth += (lvl - this.smooth) * 0.35 // ease toward the new level
       const idle = 0.035 * Math.sin(performance.now() / 520) // gentle baseline breathing
       const s = 1 + idle + this.smooth * 0.45
-      this.orbEl.style.transform = `scale(${s.toFixed(3)})`
+      this.orbEl.setCssStyles({ transform: `scale(${s.toFixed(3)})` })
     }
-    this.raf = requestAnimationFrame(tick)
+    this.raf = window.requestAnimationFrame(tick)
   }
 
   stopLevelMeter() {
-    if (this.raf != null) cancelAnimationFrame(this.raf)
+    if (this.raf != null) window.cancelAnimationFrame(this.raf)
     this.raf = null
     this.levelSource = null
     this.smooth = 0
-    if (this.orbEl) this.orbEl.style.transform = ''
+    if (this.orbEl) this.orbEl.setCssStyles({ transform: '' })
   }
 
   // Re-apply every user-facing string in the current language.
