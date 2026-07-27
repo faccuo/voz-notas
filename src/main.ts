@@ -347,7 +347,10 @@ export default class VozNotasPlugin extends Plugin {
       relayUrl: this.settings.relayUrl,
       sessionId: this.settings.remoteSessionId,
       // The same executor the local voice session uses — this line IS the product.
-      execute: (name, args) => this.tools.execute(name, args),
+      execute: (name, args) => {
+        new Notice(`📱 ${name}`) // make remote calls visible on the desktop
+        return this.tools.execute(name, args)
+      },
       onStatus: (status) => new Notice(t(`remote.status.${status}`)),
     })
     this.remote.start()
