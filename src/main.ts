@@ -1,6 +1,6 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, prepareFuzzySearch, requestUrl } from 'obsidian'
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, requestUrl } from 'obsidian'
 import { startVoiceSession, type VoiceSession, type ToolDef, type ToolArgs, type RealtimeEvent } from './core/voice'
-import { snippetAround, type Note } from './core/retrieval'
+import { VaultToolExecutor } from './vault-tools'
 import { VozNotasView, VIEW_TYPE } from './view'
 import { t, setLang, type Lang } from './i18n'
 
@@ -262,8 +262,7 @@ const END_SESSION_TOOL: ToolDef = {
 export default class VozNotasPlugin extends Plugin {
   settings!: VozNotasSettings // set in onload() via loadSettings()
   session: VoiceSession | null = null
-  notesCache: Note[] | null = null
-  notesReadPromise: Promise<Note[]> | null = null
+  tools!: VaultToolExecutor // set in onload(), after settings are loaded
   // Transcript of the current session, kept here (not in the view) so it
   // survives the panel being closed. Saved as a note when the session ends.
   sessionLog: Array<{ role: 'user' | 'assistant'; id?: string; text: string }> = []
@@ -278,6 +277,14 @@ export default class VozNotasPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings()
+
+    // The desktop implementation of ToolExecutor: runs every tool against the
+    // local vault. The remote bridge (mobile) will call this same object.
+    this.tools = new VaultToolExecutor({
+      app: this.app,
+      getSettings: () => this.settings,
+      onConsulted: (path) => this.noteConsulted(path),
+    })
 
     // Register the settings pane (where the API key lives).
     this.addSettingTab(new VozNotasSettingTab(this.app, this))
@@ -312,7 +319,7 @@ export default class VozNotasPlugin extends Plugin {
 
     // Warm the notes cache once the vault is ready. (onload runs before the file
     // list is populated, which would cache an empty vault.)
-    this.app.workspace.onLayoutReady(() => void this.readVault())
+    this.app.workspace.onLayoutReady(() => void this.tools.readVault())
   }
 
   onunload() {
@@ -486,11 +493,7 @@ export default class VozNotasPlugin extends Plugin {
         if (file instanceof TFile) await this.app.vault.modify(file, body)
       }
       // Keep the in-memory index in sync so this very session is searchable.
-      if (this.notesCache) {
-        const cached = this.notesCache.find((note) => note.path === this.sessionNotePath)
-        if (cached) cached.content = body
-        else this.notesCache.push({ path: this.sessionNotePath, content: body })
-      }
+      this.tools.updateIndex(this.sessionNotePath, body)
     } catch (e) {
       console.error('voz-notas: failed to save session note', e)
     }
@@ -545,9 +548,9 @@ export default class VozNotasPlugin extends Plugin {
     }
     try {
       // Build the note index BEFORE connecting, so in-session search is pure in-memory.
-      if (!this.notesCache || this.notesCache.length === 0) {
+      if (this.tools.indexSize() === 0) {
         new Notice(t('notice.preparing'))
-        await this.readVault()
+        await this.tools.readVault()
       }
       // Fresh transcript for the new session.
       this.sessionLog = []
@@ -597,7 +600,10 @@ export default class VozNotasPlugin extends Plugin {
     }
   }
 
-  // Run a tool the model asked for, and return its result as a string.
+  // Run a tool the model asked for. Session control (end_session) is handled
+  // here — it belongs to THIS session, never to a tool executor (a remote
+  // client must not be able to end the desktop's session). Everything else is
+  // delegated to the ToolExecutor, the same seam the mobile relay will use.
   async handleToolCall(name: string, args: ToolArgs): Promise<string> {
     if (name === 'end_session') {
       // Don't close yet — let the model speak its goodbye first. We close when
@@ -608,313 +614,7 @@ export default class VozNotasPlugin extends Plugin {
       }, 10000)
       return 'Closing after your goodbye.'
     }
-    if (name === 'search_notes') {
-      const hits = this.searchNotes(String(args?.query ?? ''), 5)
-      hits.forEach((h) => this.noteConsulted(h.path))
-      if (hits.length > 0) return hits.map((h) => `Note: ${h.path}\n${h.snippet}`).join('\n\n---\n\n')
-      return this.notesCache?.length ? 'No matching notes found.' : 'Notes are still loading.'
-    }
-    if (name === 'read_note') {
-      const p = String(args?.path ?? '')
-      this.noteConsulted(p)
-      const content = await this.readNote(p)
-      return content ?? 'Note not found.'
-    }
-    if (name === 'open_note') {
-      const p = String(args?.path ?? '')
-      const opened = await this.openNote(p)
-      if (opened) this.noteConsulted(p)
-      return opened ? 'Opened it.' : 'Note not found.'
-    }
-    if (name === 'get_active_note') {
-      const file = this.app.workspace.getActiveFile()
-      if (!file) return 'No note is open.'
-      this.noteConsulted(file.path)
-      const content = (await this.app.vault.cachedRead(file)).slice(0, 6000)
-      return `Path: ${file.path}\n\n${content}`
-    }
-    if (name === 'find_note_by_name') {
-      const paths = this.findNotesByName(String(args?.name ?? ''), 8)
-      return paths.length ? paths.join('\n') : 'No notes with that name.'
-    }
-    if (name === 'list_folders') {
-      const folders = this.listFolders(String(args?.query ?? ''), 30)
-      return folders.length ? folders.join('\n') : 'No folders found.'
-    }
-    if (name === 'list_folder') {
-      const paths = this.listFolder(String(args?.folder ?? ''), 50)
-      return paths.length ? paths.join('\n') : 'No notes in that folder.'
-    }
-    if (name === 'get_links') return this.getLinks(String(args?.path ?? ''))
-    if (name === 'get_outline') return this.getOutline(String(args?.path ?? ''))
-    if (name === 'list_tags') return this.listTags()
-    if (name === 'find_notes_by_tag') {
-      const paths = this.findNotesByTag(String(args?.tag ?? ''), 20)
-      return paths.length ? paths.join('\n') : 'No notes with that tag.'
-    }
-    if (name === 'insert_text') {
-      const ok = this.insertText(String(args?.text ?? ''))
-      return ok ? 'Inserted it.' : 'No editor is active (open a note first).'
-    }
-    if (name === 'think') {
-      const paths = Array.isArray(args?.paths) ? args.paths.map(String) : []
-      return await this.think(String(args?.question ?? ''), paths)
-    }
-    if (name === 'remember_rule') {
-      return await this.rememberRule(String(args?.rule ?? ''))
-    }
-    if (name === 'create_note') {
-      const path = await this.createNote(String(args?.title ?? ''), String(args?.content ?? ''))
-      return path ? `Created ${path}.` : 'Could not create the note.'
-    }
-    if (name === 'append_to_note') {
-      const ok = await this.appendToActiveNote(String(args?.text ?? ''))
-      return ok ? 'Added it to the open note.' : 'No note is open to append to.'
-    }
-    return `Unknown tool: ${name}`
-  }
-
-  // Create a new note in the fixed folder. Non-destructive: never overwrites an existing note.
-  async createNote(title: string, content: string): Promise<string | null> {
-    if (!this.app.vault.getAbstractFileByPath(this.getNotesFolder())) {
-      await this.app.vault.createFolder(this.getNotesFolder()).catch(() => {})
-    }
-    const safe = (title || 'Untitled').replace(/[\\/:*?"<>|]/g, ' ').trim() || 'Untitled'
-    let path = `${this.getNotesFolder()}/${safe}.md`
-    let n = 1
-    while (this.app.vault.getAbstractFileByPath(path)) path = `${this.getNotesFolder()}/${safe} ${++n}.md`
-    const file = await this.app.vault.create(path, content)
-    await this.app.workspace.getLeaf(false).openFile(file) // open the new note
-    return file.path
-  }
-
-  // Append text to the note the user currently has open. Non-destructive.
-  async appendToActiveNote(text: string): Promise<boolean> {
-    const file = this.app.workspace.getActiveFile()
-    if (!file) return false
-    await this.app.vault.append(file, `\n${text}\n`)
-    return true
-  }
-
-  // --- B: structure / graph (metadataCache — in memory, no disk reads) ---
-  getLinks(path: string): string {
-    const file = this.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) return 'Note not found.'
-    const outgoing = (this.app.metadataCache.getFileCache(file)?.links ?? []).map((l) => l.link)
-    const backlinks: string[] = []
-    for (const [src, targets] of Object.entries(this.app.metadataCache.resolvedLinks)) {
-      if (targets[file.path]) backlinks.push(src)
-    }
-    return `Outgoing: ${outgoing.join(', ') || 'none'}\nBacklinks: ${backlinks.join(', ') || 'none'}`
-  }
-
-  getOutline(path: string): string {
-    const file = this.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) return 'Note not found.'
-    const headings = this.app.metadataCache.getFileCache(file)?.headings ?? []
-    return headings.length ? headings.map((h) => `${'#'.repeat(h.level)} ${h.heading}`).join('\n') : 'No headings.'
-  }
-
-  listTags(): string {
-    const set = new Set<string>()
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      const cache = this.app.metadataCache.getFileCache(file)
-      cache?.tags?.forEach((t) => set.add(t.tag))
-      const fm: unknown = cache?.frontmatter?.tags
-      if (Array.isArray(fm)) fm.forEach((t) => set.add('#' + String(t).replace(/^#/, '')))
-    }
-    return [...set].sort().join(', ') || 'No tags.'
-  }
-
-  findNotesByTag(tag: string, limit = 20): string[] {
-    const want = '#' + tag.replace(/^#/, '').toLowerCase()
-    const out: string[] = []
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      const cache = this.app.metadataCache.getFileCache(file)
-      const tags = (cache?.tags ?? []).map((t) => t.tag.toLowerCase())
-      const fm: unknown = cache?.frontmatter?.tags
-      const fmTags = Array.isArray(fm) ? fm.map((t) => '#' + String(t).replace(/^#/, '').toLowerCase()) : []
-      if (tags.includes(want) || fmTags.includes(want)) out.push(file.path)
-      if (out.length >= limit) break
-    }
-    return out
-  }
-
-  // --- Editor: write at the cursor / replace the selection in the open note ---
-  insertText(text: string): boolean {
-    const editor = this.app.workspace.activeEditor?.editor
-    if (!editor) return false
-    editor.replaceSelection(text) // inserts at the cursor, or replaces the current selection
-    return true
-  }
-
-  // --- Delegate deep reasoning to a stronger model over the given notes (BYOK, same key) ---
-  async think(question: string, paths: string[]): Promise<string> {
-    const chunks: string[] = []
-    for (const p of paths.slice(0, 6)) {
-      const file = this.app.vault.getAbstractFileByPath(p)
-      if (file instanceof TFile) {
-        const content = (await this.app.vault.cachedRead(file)).slice(0, 3000)
-        chunks.push(`# ${p}\n${content}`)
-      }
-    }
-    const context = chunks.length ? chunks.join('\n\n---\n\n') : '(no notes provided)'
-    try {
-      const res = await requestUrl({
-        url: 'https://api.openai.com/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.settings.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.settings.reasoningModel || 'gpt-5',
-          messages: [
-            {
-              role: 'system',
-              content:
-                "You are a sharp, thoughtful analyst of the user's personal notes. Give a well-reasoned, concise answer or opinion grounded in the provided notes. Be direct and honest.",
-            },
-            { role: 'user', content: `Notes:\n${context}\n\nQuestion: ${question}` },
-          ],
-        }),
-      })
-      const data = res.json as { choices?: Array<{ message?: { content?: unknown } }> } | undefined
-      const answer = data?.choices?.[0]?.message?.content
-      return typeof answer === 'string' && answer.trim() ? answer : 'Could not get a reasoned answer.'
-    } catch (e) {
-      console.error('think error:', e)
-      return 'The reasoning model failed: ' + (e as Error).message
-    }
-  }
-
-  // Read one note's full content (capped so a huge note doesn't flood the model).
-  async readNote(path: string): Promise<string | null> {
-    const file = this.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) return null
-    const content = await this.app.vault.cachedRead(file)
-    return content.slice(0, 6000)
-  }
-
-  // Open a note in the active pane so the user sees it. (An action on Obsidian.)
-  async openNote(path: string): Promise<boolean> {
-    const file = this.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) return false
-    await this.app.workspace.getLeaf(false).openFile(file)
-    return true
-  }
-
-  // Find notes by filename/title with Obsidian's fuzzy matcher (fast: short strings, no reads).
-  findNotesByName(query: string, limit = 8): string[] {
-    const q = query.trim()
-    if (!q) return []
-    const match = prepareFuzzySearch(q)
-    const scored: { path: string; score: number }[] = []
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      const res = match(file.basename) ?? match(file.path)
-      if (res) scored.push({ path: file.path, score: res.score })
-    }
-    scored.sort((a, b) => b.score - a.score)
-    return scored.slice(0, limit).map((s) => s.path)
-  }
-
-  // List the markdown notes inside a folder path.
-  listFolder(folder: string, limit = 50): string[] {
-    const prefix = folder.replace(/\/+$/, '') + '/'
-    return this.app.vault
-      .getMarkdownFiles()
-      .filter((f) => f.path.startsWith(prefix))
-      .slice(0, limit)
-      .map((f) => f.path)
-  }
-
-  // List/find folders (derived from note paths), optionally filtered by name (fuzzy).
-  listFolders(query = '', limit = 30): string[] {
-    const folders = new Set<string>()
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      const parts = file.path.split('/')
-      parts.pop() // drop the filename
-      let acc = ''
-      for (const part of parts) {
-        acc = acc ? `${acc}/${part}` : part
-        folders.add(acc)
-      }
-    }
-    let list = [...folders]
-    const q = query.trim()
-    if (q) {
-      const match = prepareFuzzySearch(q)
-      list = list
-        .map((path) => ({ path, res: match(path) }))
-        .filter((x) => x.res)
-        .sort((a, b) => b.res!.score - a.res!.score)
-        .map((x) => x.path)
-    } else {
-      list.sort()
-    }
-    return list.slice(0, limit)
-  }
-
-  // Synchronous, in-memory keyword search over the pre-built cache. Instant, no I/O.
-  searchNotes(query: string, limit = 3): { path: string; snippet: string }[] {
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
-    const notes = this.notesCache ?? []
-    if (terms.length === 0 || notes.length === 0) return []
-    const scored: { note: Note; score: number; at: number }[] = []
-    for (const note of notes) {
-      const lower = note.content.toLowerCase()
-      let score = 0
-      let at = -1
-      for (const term of terms) {
-        const idx = lower.indexOf(term)
-        if (idx >= 0) {
-          score++
-          if (at < 0 || idx < at) at = idx
-        }
-      }
-      if (score > 0) scored.push({ note, score, at: at < 0 ? 0 : at })
-    }
-    scored.sort((a, b) => b.score - a.score) // more matched terms = better
-    return scored.slice(0, limit).map(({ note, at }) => ({
-      path: note.path,
-      snippet: snippetAround(note.content, at),
-    }))
-  }
-
-  // Read all Markdown notes from the vault, cached and in parallel. (Obsidian-specific.)
-  // Dedups concurrent reads: callers share one in-flight read instead of starting more.
-  async readVault(): Promise<Note[]> {
-    if (this.notesCache && this.notesCache.length > 0) return this.notesCache
-    if (this.notesReadPromise) return this.notesReadPromise
-    this.notesReadPromise = (async () => {
-      const files = this.app.vault.getMarkdownFiles()
-      const notes = await Promise.all(
-        files.map(async (file) => ({
-          path: file.path,
-          content: await this.app.vault.cachedRead(file),
-        })),
-      )
-      this.notesCache = notes
-      this.notesReadPromise = null
-      return notes
-    })()
-    return this.notesReadPromise
-  }
-
-  // Persist a behaviour rule to the AGENTS.md (self-maintaining instructions).
-  async rememberRule(rule: string): Promise<string> {
-    const clean = rule.trim()
-    if (!clean) return 'Empty rule.'
-    const path = this.settings.agentsFile?.trim() || 'AGENTS.md'
-    const existing = this.app.vault.getAbstractFileByPath(path)
-    const file = existing instanceof TFile ? existing : await this.app.vault.create(path, '# Assistant instructions\n')
-    const current = await this.app.vault.cachedRead(file)
-    if (current.toLowerCase().includes(clean.toLowerCase())) return 'Already remembered.'
-    const marker = '## Learned preferences'
-    let next = current.includes(marker) ? current : `${current.trimEnd()}\n\n${marker}\n`
-    next = `${next.trimEnd()}\n- ${clean}\n`
-    await this.app.vault.modify(file, next)
-    return 'Remembered — it will apply next session.'
+    return this.tools.execute(name, args)
   }
 
   // Merge the base instructions (in code) with the user's AGENTS.md from the vault, if present.
