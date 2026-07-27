@@ -1,6 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, requestUrl } from 'obsidian'
 import { startVoiceSession, type VoiceSession, type ToolDef, type ToolArgs, type RealtimeEvent } from './core/voice'
 import { VaultToolExecutor } from './vault-tools'
+import { RemoteBridge, newSessionId } from './remote'
 import { VozNotasView, VIEW_TYPE } from './view'
 import { t, setLang, type Lang } from './i18n'
 
@@ -12,6 +13,9 @@ interface VozNotasSettings {
   saveSessions: boolean
   assistantName: string
   notesFolder: string
+  remoteEnabled: boolean
+  relayUrl: string
+  remoteSessionId: string
 }
 
 const DEFAULT_SETTINGS: VozNotasSettings = {
@@ -22,6 +26,9 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   saveSessions: true,
   assistantName: 'Eco',
   notesFolder: 'Eco',
+  remoteEnabled: false,
+  relayUrl: 'ws://localhost:8787',
+  remoteSessionId: '',
 }
 
 const INSTRUCTIONS = `You are a voice assistant over the user's personal Obsidian notes (Markdown, linked with [[wikilinks]], tagged with #tags).
@@ -263,6 +270,7 @@ export default class VozNotasPlugin extends Plugin {
   settings!: VozNotasSettings // set in onload() via loadSettings()
   session: VoiceSession | null = null
   tools!: VaultToolExecutor // set in onload(), after settings are loaded
+  remote: RemoteBridge | null = null
   // Transcript of the current session, kept here (not in the view) so it
   // survives the panel being closed. Saved as a note when the session ends.
   sessionLog: Array<{ role: 'user' | 'assistant'; id?: string; text: string }> = []
@@ -319,10 +327,39 @@ export default class VozNotasPlugin extends Plugin {
 
     // Warm the notes cache once the vault is ready. (onload runs before the file
     // list is populated, which would cache an empty vault.)
-    this.app.workspace.onLayoutReady(() => void this.tools.readVault())
+    this.app.workspace.onLayoutReady(() => {
+      void this.tools.readVault()
+      // Resume remote control if it was enabled (after the cache warm-up starts,
+      // so a phone's first search doesn't hit an empty index).
+      if (this.settings.remoteEnabled) this.startRemote()
+    })
+  }
+
+  // --- Remote control: answer tool calls from a paired phone via the relay ---
+
+  startRemote() {
+    if (this.remote) return
+    if (!this.settings.remoteSessionId) {
+      this.settings.remoteSessionId = newSessionId()
+      void this.saveSettings()
+    }
+    this.remote = new RemoteBridge({
+      relayUrl: this.settings.relayUrl,
+      sessionId: this.settings.remoteSessionId,
+      // The same executor the local voice session uses — this line IS the product.
+      execute: (name, args) => this.tools.execute(name, args),
+      onStatus: (status) => new Notice(t(`remote.status.${status}`)),
+    })
+    this.remote.start()
+  }
+
+  stopRemote() {
+    this.remote?.stop()
+    this.remote = null
   }
 
   onunload() {
+    this.stopRemote()
     this.session?.stop()
     this.session = null
     // Best-effort: the incremental flushes have already saved everything but
@@ -752,6 +789,56 @@ class VozNotasSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings()
         })
       })
+
+    new Setting(containerEl)
+      .setName(t('settings.remote.name'))
+      .setDesc(t('settings.remote.desc'))
+      .addToggle((tg) => {
+        tg.setValue(this.plugin.settings.remoteEnabled).onChange(async (value) => {
+          this.plugin.settings.remoteEnabled = value
+          await this.plugin.saveSettings()
+          if (value) this.plugin.startRemote()
+          else this.plugin.stopRemote()
+          this.display()
+        })
+      })
+
+    if (this.plugin.settings.remoteEnabled) {
+      new Setting(containerEl)
+        .setName(t('settings.relayUrl.name'))
+        .setDesc(t('settings.relayUrl.desc'))
+        .addText((text) => {
+          text
+            .setPlaceholder('ws://localhost:8787')
+            .setValue(this.plugin.settings.relayUrl)
+            .onChange(async (value) => {
+              this.plugin.settings.relayUrl = value.trim() || 'ws://localhost:8787'
+              await this.plugin.saveSettings()
+            })
+        })
+
+      new Setting(containerEl)
+        .setName(t('settings.pairingId.name'))
+        .setDesc(t('settings.pairingId.desc'))
+        .addButton((btn) => {
+          btn.setButtonText(this.plugin.settings.remoteSessionId || '—').onClick(async () => {
+            await navigator.clipboard.writeText(this.plugin.settings.remoteSessionId)
+            new Notice(t('remote.copied'))
+          })
+        })
+        .addExtraButton((btn) => {
+          btn
+            .setIcon('refresh-cw')
+            .setTooltip('Regenerate')
+            .onClick(async () => {
+              this.plugin.settings.remoteSessionId = newSessionId()
+              await this.plugin.saveSettings()
+              this.plugin.stopRemote()
+              this.plugin.startRemote()
+              this.display()
+            })
+        })
+    }
 
     new Setting(containerEl)
       .setName('OpenAI API key')
