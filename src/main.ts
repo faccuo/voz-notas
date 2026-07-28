@@ -266,6 +266,23 @@ const END_SESSION_TOOL: ToolDef = {
 }
 
 
+// A short human label for what a tool call is doing — the "Searching…" /
+// "Thinking…" feedback shown in the panel (and in notices for remote calls).
+function activityLabel(name: string, args: ToolArgs): string {
+  if (name === 'search_notes') return t('activity.search', String(args?.query ?? ''))
+  if (name === 'find_note_by_name') return t('activity.search', String(args?.name ?? ''))
+  if (name === 'find_notes_by_tag') return t('activity.search', '#' + String(args?.tag ?? ''))
+  if (name === 'read_note' || name === 'get_outline' || name === 'get_links' || name === 'open_note') {
+    const file = String(args?.path ?? '').split('/').pop() ?? ''
+    return t('activity.read', file.replace(/\.md$/, ''))
+  }
+  if (name === 'think') return t('activity.think')
+  if (name === 'create_note' || name === 'append_to_note' || name === 'insert_text' || name === 'remember_rule') {
+    return t('activity.write')
+  }
+  return t('activity.browse')
+}
+
 export default class VozNotasPlugin extends Plugin {
   settings!: VozNotasSettings // set in onload() via loadSettings()
   session: VoiceSession | null = null
@@ -348,7 +365,11 @@ export default class VozNotasPlugin extends Plugin {
       sessionId: this.settings.remoteSessionId,
       // The same executor the local voice session uses — this line IS the product.
       execute: (name, args) => {
-        new Notice(`📱 ${name}`) // make remote calls visible on the desktop
+        // Make the phone's activity visible on the desktop: a notice always
+        // (works with the panel closed) and an activity line if it's open.
+        const label = t('activity.remote', activityLabel(name, args))
+        new Notice(label)
+        this.getView()?.addActivity(label)
         return this.tools.execute(name, args)
       },
       onStatus: (status) => new Notice(t(`remote.status.${status}`)),
@@ -654,28 +675,15 @@ export default class VozNotasPlugin extends Plugin {
       }, 10000)
       return 'Closing after your goodbye.'
     }
+    this.getView()?.addActivity(activityLabel(name, args))
     return this.tools.execute(name, args)
   }
 
-  // Merge the base instructions (in code) with the user's AGENTS.md from the vault, if present.
+  // Base instructions (in code) + the vault context from init_session — the
+  // SAME bootstrap the mobile client requests through the relay, so both
+  // sessions start from one source of truth (identity, folders, AGENTS.md).
   async getInstructions(): Promise<string> {
-    // Default spoken language = the settings language; the user can still switch
-    // mid-conversation just by speaking another language.
-    const lang = this.settings.language === 'es' ? 'Spanish' : 'English'
-    const name = this.settings.assistantName?.trim() || 'Eco'
-    const langLine = `Your name is ${name} — that's what the user calls you. Speak ${lang} by default. If the user speaks another language, switch to it.`
-    const foldersLine = `New notes you create go in "${this.getNotesFolder()}". Past sessions are saved as notes under "${this.getSessionsFolder()}" — when the user refers to an earlier conversation ("what did we talk about yesterday?"), search or list that folder.`
-    const base = `${INSTRUCTIONS}\n\n${langLine}\n${foldersLine}`
-
-    const path = this.settings.agentsFile?.trim() || 'AGENTS.md'
-    const file = this.app.vault.getAbstractFileByPath(path)
-    if (file instanceof TFile) {
-      const userInstructions = (await this.app.vault.cachedRead(file)).trim()
-      if (userInstructions) {
-        return `${base}\n\n--- User instructions (from ${path}) ---\n${userInstructions}`
-      }
-    }
-    return base
+    return `${INSTRUCTIONS}\n\n${await this.tools.execute('init_session', {})}`
   }
 
   // Mint a short-lived ephemeral token using the user's key.

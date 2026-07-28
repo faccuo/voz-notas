@@ -10,6 +10,8 @@ export interface VaultToolsSettings {
   reasoningModel: string
   agentsFile: string
   notesFolder: string
+  language: string
+  assistantName: string
 }
 
 export interface VaultToolsConfig {
@@ -91,11 +93,22 @@ export class VaultToolExecutor implements ToolExecutor {
     if (name === 'remember_rule') {
       return await this.rememberRule(String(args?.rule ?? ''))
     }
+    if (name === 'init_session') {
+      return await this.initSession()
+    }
     if (name === 'create_note') {
       const path = await this.createNote(String(args?.title ?? ''), String(args?.content ?? ''))
       return path ? `Created ${path}.` : 'Could not create the note.'
     }
     if (name === 'append_to_note') {
+      // With a path (the remote/mobile case) append to that note; without one
+      // (the original desktop shape) append to whatever note is open.
+      const path = String(args?.path ?? '')
+      if (path) {
+        const ok = await this.appendToNote(path, String(args?.text ?? ''))
+        if (ok) this.onConsulted?.(path)
+        return ok ? 'Added it.' : 'Note not found.'
+      }
       const ok = await this.appendToActiveNote(String(args?.text ?? ''))
       return ok ? 'Added it to the open note.' : 'No note is open to append to.'
     }
@@ -277,6 +290,28 @@ export class VaultToolExecutor implements ToolExecutor {
     return out
   }
 
+  // Everything a session needs to know about this vault at start — identity,
+  // where things live, and the user's standing rules (AGENTS.md). Bootstrap
+  // call, not a model tool: desktop and mobile both request it through the
+  // executor seam when a session opens, so the phone inherits the exact same
+  // context without being able to read the vault.
+  async initSession(): Promise<string> {
+    const s = this.getSettings()
+    const name = s.assistantName?.trim() || 'Eco'
+    const lang = s.language === 'es' ? 'Spanish' : 'English'
+    const parts = [
+      `Your name is ${name} — that's what the user calls you. Speak ${lang} by default. If the user speaks another language, switch to it.`,
+      `New notes you create go in "${this.getNotesFolder()}". Past sessions are saved as notes under "${this.getNotesFolder()}/sessions" — when the user refers to an earlier conversation ("what did we talk about yesterday?"), search or list that folder.`,
+    ]
+    // Full read on purpose: readNote() caps at 6000 chars for model reads,
+    // but standing rules must never be silently truncated.
+    const path = s.agentsFile?.trim() || 'AGENTS.md'
+    const file = this.app.vault.getAbstractFileByPath(path)
+    const rules = file instanceof TFile ? (await this.app.vault.cachedRead(file)).trim() : ''
+    if (rules) parts.push(`--- User instructions (from ${path}) ---\n${rules}`)
+    return parts.join('\n\n')
+  }
+
   // --- Writing (all non-destructive; confirmation is enforced by the instructions) ---
 
   private getNotesFolder(): string {
@@ -295,6 +330,14 @@ export class VaultToolExecutor implements ToolExecutor {
     const file = await this.app.vault.create(path, content)
     await this.app.workspace.getLeaf(false).openFile(file) // open the new note
     return file.path
+  }
+
+  // Append text to a specific note by path. Non-destructive.
+  async appendToNote(path: string, text: string): Promise<boolean> {
+    const file = this.app.vault.getAbstractFileByPath(path)
+    if (!(file instanceof TFile)) return false
+    await this.app.vault.append(file, `\n${text}\n`)
+    return true
   }
 
   // Append text to the note the user currently has open. Non-destructive.

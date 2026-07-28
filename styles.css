@@ -189,6 +189,17 @@
 .vn-turn.vn-pending {
   opacity: 0.5;
 }
+.vn-activity {
+  align-self: center;
+  font-size: var(--font-ui-smaller);
+  font-style: italic;
+  color: var(--text-muted);
+  animation: vn-activity-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vn-activity-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
 
 .vn-section-label {
   font-size: 11px;
@@ -213,6 +224,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Without this, the height-capped flex column squeezes the chips
+     vertically and rows get sliced in half. */
+  flex-shrink: 0;
 }
 .vn-file:hover {
   background: var(--background-modifier-hover);

@@ -17,6 +17,7 @@ export class VozNotasView extends ItemView {
   private transcriptEl!: HTMLElement
   private filesEl!: HTMLElement
   private currentAssistant: HTMLElement | null = null
+  private activityEl: HTMLElement | null = null
   private consulted = new Set<string>()
   private pendingUser = new Map<string, HTMLElement>()
   private phase: Phase = 'idle'
@@ -199,10 +200,29 @@ export class VozNotasView extends ItemView {
   appendAssistant(delta: string) {
     if (!delta) return
     if (!this.currentAssistant) {
+      // The answer is starting — the "Searching…" line has served its purpose.
+      this.clearActivity()
       this.currentAssistant = this.transcriptEl.createDiv({ cls: 'vn-turn vn-assistant' })
     }
     this.currentAssistant.setText(this.currentAssistant.getText() + delta)
     this.scroll()
+  }
+
+  // Transient "what I'm doing" line (Searching… / Thinking…). One at a time:
+  // a new activity replaces the previous, and the NEXT assistant bubble clears
+  // it. Deliberately does not touch currentAssistant — the model often speaks
+  // ("let me check…") in the same response that calls the tool, and resetting
+  // it would split that utterance in two and wipe this line on the next delta.
+  addActivity(text: string) {
+    if (!text) return
+    this.clearActivity()
+    this.activityEl = this.transcriptEl.createDiv({ cls: 'vn-activity', text })
+    this.scroll()
+  }
+
+  private clearActivity() {
+    this.activityEl?.remove()
+    this.activityEl = null
   }
 
   finishAssistant() {
@@ -223,6 +243,7 @@ export class VozNotasView extends ItemView {
     this.consulted.clear()
     this.pendingUser.clear()
     this.currentAssistant = null
+    this.activityEl = null
   }
 
   private scroll() {
