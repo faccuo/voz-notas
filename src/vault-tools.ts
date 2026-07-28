@@ -12,6 +12,7 @@ export interface VaultToolsSettings {
   notesFolder: string
   language: string
   assistantName: string
+  saveSessions: boolean
 }
 
 export interface VaultToolsConfig {
@@ -95,6 +96,17 @@ export class VaultToolExecutor implements ToolExecutor {
     }
     if (name === 'init_session') {
       return await this.initSession()
+    }
+    if (name === 'save_session') {
+      // Service call from the mobile client (not a model tool): persist the
+      // phone session transcript in the sessions folder. Incremental flushes
+      // resend the whole markdown, so create-or-overwrite is idempotent.
+      if (!this.getSettings().saveSessions) return 'Session saving is disabled in settings.'
+      const title = String(args?.title ?? '').replace(/[\\/:*?"<>|]/g, ' ').trim()
+      const markdown = String(args?.markdown ?? '')
+      if (!title || !markdown) return 'Error: missing title or content.'
+      await this.saveSessionNote(title, markdown)
+      return 'Saved.'
     }
     if (name === 'create_note') {
       const path = await this.createNote(String(args?.title ?? ''), String(args?.content ?? ''))
@@ -310,6 +322,19 @@ export class VaultToolExecutor implements ToolExecutor {
     const rules = file instanceof TFile ? (await this.app.vault.cachedRead(file)).trim() : ''
     if (rules) parts.push(`--- User instructions (from ${path}) ---\n${rules}`)
     return parts.join('\n\n')
+  }
+
+  // Create or overwrite a session note under "<notes>/sessions". Mirrors the
+  // desktop's own session saving; used by save_session for mobile transcripts.
+  async saveSessionNote(title: string, markdown: string): Promise<void> {
+    const folder = `${this.getNotesFolder()}/sessions`
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder).catch(() => {})
+    }
+    const path = `${folder}/${title}.md`
+    const existing = this.app.vault.getAbstractFileByPath(path)
+    if (existing instanceof TFile) await this.app.vault.modify(existing, markdown)
+    else await this.app.vault.create(path, markdown)
   }
 
   // --- Writing (all non-destructive; confirmation is enforced by the instructions) ---

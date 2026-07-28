@@ -367,9 +367,13 @@ export default class VozNotasPlugin extends Plugin {
       execute: (name, args) => {
         // Make the phone's activity visible on the desktop: a notice always
         // (works with the panel closed) and an activity line if it's open.
-        const label = t('activity.remote', activityLabel(name, args))
-        new Notice(label)
-        this.getView()?.addActivity(label)
+        // Service calls (bootstrap, transcript flushes) stay silent — they
+        // are plumbing, not user activity, and flushes repeat every few turns.
+        if (name !== 'init_session' && name !== 'save_session') {
+          const label = t('activity.remote', activityLabel(name, args))
+          new Notice(label)
+          this.getView()?.addActivity(label)
+        }
         return this.tools.execute(name, args)
       },
       onStatus: (status) => new Notice(t(`remote.status.${status}`)),
