@@ -1,4 +1,4 @@
-import { App, TFile, prepareFuzzySearch, requestUrl } from 'obsidian'
+import { App, TAbstractFile, TFile, prepareFuzzySearch, requestUrl } from 'obsidian'
 import type { ToolExecutor } from './core/tools'
 import type { ToolArgs } from './core/voice'
 import { snippetAround, type Note } from './core/retrieval'
@@ -40,9 +40,25 @@ export class VaultToolExecutor implements ToolExecutor {
 
   async execute(name: string, args: ToolArgs): Promise<string> {
     if (name === 'search_notes') {
-      const hits = this.searchNotes(String(args?.query ?? ''), 5)
+      const query = String(args?.query ?? '')
+      const hits = this.searchNotes(query, 5)
       hits.forEach((h) => this.onConsulted?.(h.path))
       if (hits.length > 0) return hits.map((h) => `Note: ${h.path}\n${h.snippet}`).join('\n\n---\n\n')
+      // Content search came up dry — fall back to filename matching over the
+      // LIVE file list (never stale), so "read me X" works even for notes the
+      // index somehow missed.
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+      const byName = this.app.vault
+        .getMarkdownFiles()
+        .filter((f) => terms.some((term) => f.basename.toLowerCase().includes(term)))
+        .slice(0, 5)
+      if (byName.length > 0) {
+        byName.forEach((f) => this.onConsulted?.(f.path))
+        return (
+          'No content matches, but these note names match:\n' +
+          byName.map((f) => `Note: ${f.path}`).join('\n')
+        )
+      }
       return this.notesCache?.length ? 'No matching notes found.' : 'Notes are still loading.'
     }
     if (name === 'read_note') {
@@ -160,6 +176,19 @@ export class VaultToolExecutor implements ToolExecutor {
     const cached = this.notesCache.find((note) => note.path === path)
     if (cached) cached.content = content
     else this.notesCache.push({ path, content })
+  }
+
+  // Vault-event hooks (create/modify): re-read one file into the index, so
+  // notes the assistant just created — or the user just edited — are
+  // searchable immediately, without reloading the plugin.
+  async refreshIndexFile(file: TAbstractFile) {
+    if (!(file instanceof TFile) || file.extension !== 'md') return
+    if (!this.notesCache) return // initial vault read will pick it up
+    this.updateIndex(file.path, await this.app.vault.cachedRead(file))
+  }
+
+  dropFromIndex(path: string) {
+    if (this.notesCache) this.notesCache = this.notesCache.filter((note) => note.path !== path)
   }
 
   // Synchronous, in-memory keyword search over the pre-built cache. Instant, no I/O.

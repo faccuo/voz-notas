@@ -346,6 +346,19 @@ export default class VozNotasPlugin extends Plugin {
       callback: () => this.activateView(),
     })
 
+    // Keep the search index live: whatever changes the vault — the assistant's
+    // own writes, manual edits, sync — updates the in-memory cache, so a note
+    // created seconds ago is immediately searchable.
+    this.registerEvent(this.app.vault.on('create', (f) => void this.tools.refreshIndexFile(f)))
+    this.registerEvent(this.app.vault.on('modify', (f) => void this.tools.refreshIndexFile(f)))
+    this.registerEvent(
+      this.app.vault.on('rename', (f, oldPath) => {
+        this.tools.dropFromIndex(oldPath)
+        void this.tools.refreshIndexFile(f)
+      }),
+    )
+    this.registerEvent(this.app.vault.on('delete', (f) => this.tools.dropFromIndex(f.path)))
+
     // Warm the notes cache once the vault is ready. (onload runs before the file
     // list is populated, which would cache an empty vault.)
     this.app.workspace.onLayoutReady(() => {
