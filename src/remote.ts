@@ -1,5 +1,6 @@
 import type { ToolExecutor } from './core/tools'
 import type { ToolArgs } from './core/voice'
+import { deriveKey, encryptEnvelope, decryptEnvelope, type EncEnvelope } from './core/crypto'
 
 // The desktop half of remote control: connects to the pairing relay and
 // answers tool calls coming from a paired phone, executing them through the
@@ -10,10 +11,16 @@ import type { ToolArgs } from './core/voice'
 //   phone → desktop:  { type: 'tool_call', id, name, args }
 //   desktop → phone:  { type: 'tool_result', id, output }
 //   relay → both:     { type: 'presence', desktop, mobile }
+//
+// With a pairing secret, tool_call/tool_result travel wrapped in
+// { type: 'enc', iv, data } — the relay forwards bytes it cannot read.
+// presence stays plaintext: the relay originates it and it carries no data.
 
 export interface RemoteBridgeConfig {
   relayUrl: string // e.g. wss://relay.example.com or ws://localhost:8787
   sessionId: string
+  // The pairing secret from the QR. When set, tool traffic is E2E-encrypted.
+  secret?: string
   execute: (name: string, args: ToolArgs) => Promise<string>
   onStatus?: (status: 'connecting' | 'connected' | 'paired' | 'disconnected') => void
 }
@@ -30,8 +37,11 @@ export class RemoteBridge {
   private ws: WebSocket | null = null
   private stopped = false
   private retryTimer: number | null = null
+  private key: Uint8Array | null
 
-  constructor(private config: RemoteBridgeConfig) {}
+  constructor(private config: RemoteBridgeConfig) {
+    this.key = config.secret ? deriveKey(config.secret) : null
+  }
 
   start() {
     this.stopped = false
@@ -77,6 +87,11 @@ export class RemoteBridge {
     } catch {
       return // not ours
     }
+    if (msg.type === 'enc' && this.key) {
+      const inner = decryptEnvelope<RemoteMessage>(this.key, msg as unknown as EncEnvelope)
+      if (!inner) return // wrong key or tampered — drop silently
+      msg = inner
+    }
     if (msg.type === 'presence') {
       this.config.onStatus?.(msg.mobile ? 'paired' : 'connected')
       return
@@ -90,7 +105,8 @@ export class RemoteBridge {
       }
       // The socket may have dropped while the tool ran.
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'tool_result', id: msg.id, output }))
+        const reply = { type: 'tool_result', id: msg.id, output }
+        this.ws.send(JSON.stringify(this.key ? encryptEnvelope(this.key, reply) : reply))
       }
     }
   }

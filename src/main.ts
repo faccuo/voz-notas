@@ -1,7 +1,9 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, requestUrl } from 'obsidian'
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, requestUrl } from 'obsidian'
+import QRCode from 'qrcode'
 import { startVoiceSession, type VoiceSession, type ToolDef, type ToolArgs, type RealtimeEvent } from './core/voice'
 import { VaultToolExecutor } from './vault-tools'
 import { RemoteBridge, newSessionId } from './remote'
+import { newSecret } from './core/crypto'
 import { VozNotasView, VIEW_TYPE } from './view'
 import { t, setLang, type Lang } from './i18n'
 
@@ -16,6 +18,7 @@ interface VozNotasSettings {
   remoteEnabled: boolean
   relayUrl: string
   remoteSessionId: string
+  remoteSecret: string
 }
 
 const DEFAULT_SETTINGS: VozNotasSettings = {
@@ -29,6 +32,7 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   remoteEnabled: false,
   relayUrl: 'ws://localhost:8787',
   remoteSessionId: '',
+  remoteSecret: '',
 }
 
 const INSTRUCTIONS = `You are a voice assistant over the user's personal Obsidian notes (Markdown, linked with [[wikilinks]], tagged with #tags).
@@ -354,15 +358,34 @@ export default class VozNotasPlugin extends Plugin {
 
   // --- Remote control: answer tool calls from a paired phone via the relay ---
 
+  // Make sure a session id AND its E2E secret exist (they pair for life:
+  // regenerating one regenerates both, invalidating old phones).
+  ensurePairing() {
+    if (this.settings.remoteSessionId && this.settings.remoteSecret) return
+    if (!this.settings.remoteSessionId) this.settings.remoteSessionId = newSessionId()
+    if (!this.settings.remoteSecret) this.settings.remoteSecret = newSecret()
+    void this.saveSettings()
+  }
+
+  // The string inside the pairing QR. The secret travels screen → camera,
+  // never through the relay.
+  pairingPayload(): string {
+    this.ensurePairing()
+    return JSON.stringify({
+      v: 1,
+      relay: this.settings.relayUrl,
+      session: this.settings.remoteSessionId,
+      secret: this.settings.remoteSecret,
+    })
+  }
+
   startRemote() {
     if (this.remote) return
-    if (!this.settings.remoteSessionId) {
-      this.settings.remoteSessionId = newSessionId()
-      void this.saveSettings()
-    }
+    this.ensurePairing()
     this.remote = new RemoteBridge({
       relayUrl: this.settings.relayUrl,
       sessionId: this.settings.remoteSessionId,
+      secret: this.settings.remoteSecret,
       // The same executor the local voice session uses — this line IS the product.
       execute: (name, args) => {
         // Make the phone's activity visible on the desktop: a notice always
@@ -833,6 +856,16 @@ class VozNotasSettingTab extends PluginSettingTab {
         })
 
       new Setting(containerEl)
+        .setName(t('settings.qr.name'))
+        .setDesc(t('settings.qr.desc'))
+        .addButton((btn) => {
+          btn
+            .setButtonText(t('settings.qr.button'))
+            .setCta()
+            .onClick(() => new PairingQrModal(this.app, this.plugin.pairingPayload()).open())
+        })
+
+      new Setting(containerEl)
         .setName(t('settings.pairingId.name'))
         .setDesc(t('settings.pairingId.desc'))
         .addButton((btn) => {
@@ -846,7 +879,9 @@ class VozNotasSettingTab extends PluginSettingTab {
             .setIcon('refresh-cw')
             .setTooltip('Regenerate')
             .onClick(async () => {
+              // New id AND new secret: old phones are cut off together.
               this.plugin.settings.remoteSessionId = newSessionId()
+              this.plugin.settings.remoteSecret = newSecret()
               await this.plugin.saveSettings()
               this.plugin.stopRemote()
               this.plugin.startRemote()
@@ -894,5 +929,31 @@ class VozNotasSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings()
           })
       })
+  }
+}
+
+// The pairing QR: scanned by the mobile app. Rendered locally (no network) —
+// the payload holds the relay URL, the session id and the E2E secret.
+class PairingQrModal extends Modal {
+  constructor(app: App, private payload: string) {
+    super(app)
+  }
+
+  async onOpen() {
+    this.contentEl.addClass('vn-qr-modal')
+    this.contentEl.createEl('h3', { text: t('qr.title') })
+    const dataUrl = await QRCode.toDataURL(this.payload, { width: 300, margin: 1 })
+    this.contentEl.createEl('img', { attr: { src: dataUrl, alt: 'voz-notas pairing QR' } })
+    this.contentEl.createEl('p', { text: t('qr.hint'), cls: 'vn-qr-hint' })
+    new Setting(this.contentEl).addButton((btn) =>
+      btn.setButtonText(t('qr.copy')).onClick(async () => {
+        await navigator.clipboard.writeText(this.payload)
+        new Notice(t('remote.copied'))
+      }),
+    )
+  }
+
+  onClose() {
+    this.contentEl.empty()
   }
 }

@@ -232,3 +232,18 @@
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
+
+.vn-qr-modal {
+  text-align: center;
+}
+.vn-qr-modal img {
+  display: block;
+  margin: 0 auto;
+  padding: 10px;
+  background: white; /* quiet-zone contrast in dark themes */
+  border-radius: 10px;
+}
+.vn-qr-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
