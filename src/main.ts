@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   assistantName: 'Eco',
   notesFolder: 'Eco',
   remoteEnabled: false,
-  relayUrl: 'ws://localhost:8787',
+  relayUrl: 'wss://voz-notas-relay.personal-11f.workers.dev',
   remoteSessionId: '',
   remoteSecret: '',
   backendToken: '',
@@ -274,6 +274,11 @@ const END_SESSION_TOOL: ToolDef = {
 }
 
 
+// ws(s)://relay → http(s)://relay, for the backend's HTTP endpoints.
+function relayHttpBase(relayUrl: string): string {
+  return relayUrl.replace(/^ws/, 'http').replace(/\/+$/, '')
+}
+
 // A short human label for what a tool call is doing — the "Searching…" /
 // "Thinking…" feedback shown in the panel (and in notices for remote calls).
 function activityLabel(name: string, args: ToolArgs): string {
@@ -401,6 +406,28 @@ export default class VozNotasPlugin extends Plugin {
       secret: this.settings.remoteSecret,
       ...(this.settings.backendToken ? { token: this.settings.backendToken } : {}),
     })
+  }
+
+  // Universal keyless trial: ask the relay backend for a 7-day capped
+  // credential and store it where the voice paths already look (backendToken).
+  async startTrial() {
+    const res = await requestUrl({
+      url: relayHttpBase(this.settings.relayUrl) + '/trial',
+      method: 'POST',
+      throw: false,
+    })
+    if (res.status === 429) {
+      new Notice(t('trial.alreadyUsed'))
+      return
+    }
+    const data = res.json as { token?: unknown } | undefined
+    if (res.status !== 200 || typeof data?.token !== 'string') {
+      new Notice(t('trial.error'))
+      return
+    }
+    this.settings.backendToken = data.token
+    await this.saveSettings()
+    new Notice(t('trial.started'))
   }
 
   // Open the pairing QR (panel button and command palette both land here).
@@ -673,7 +700,7 @@ export default class VozNotasPlugin extends Plugin {
       await this.endSessionNote()
       return
     }
-    if (!this.settings.apiKey) {
+    if (!this.settings.apiKey && !this.settings.backendToken) {
       new Notice(t('notice.setKey'))
       return
     }
@@ -756,9 +783,24 @@ export default class VozNotasPlugin extends Plugin {
     return `${INSTRUCTIONS}\n\n${await this.tools.execute('init_session', {})}`
   }
 
-  // Mint a short-lived ephemeral token using the user's key.
+  // Mint a short-lived ephemeral token: with the user's key if they have one
+  // (BYOK), otherwise through the relay backend with the trial/subscription
+  // credential — the keyless path.
   // requestUrl runs from Obsidian's main process, so it bypasses browser CORS.
   async getEphemeralToken(): Promise<string> {
+    if (!this.settings.apiKey && this.settings.backendToken) {
+      const res = await requestUrl({
+        url: relayHttpBase(this.settings.relayUrl) + '/session-token',
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.settings.backendToken}` },
+        throw: false,
+      })
+      if (res.status === 401) throw new Error(t('trial.expired'))
+      if (res.status === 403) throw new Error(t('trial.limit'))
+      const data = res.json as { value?: unknown }
+      if (typeof data?.value !== 'string') throw new Error('No session token in the backend response.')
+      return data.value
+    }
     const res = await requestUrl({
       url: 'https://api.openai.com/v1/realtime/client_secrets',
       method: 'POST',
@@ -939,6 +981,23 @@ class VozNotasSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings()
               this.plugin.stopRemote()
               this.plugin.startRemote()
+              this.display()
+            })
+        })
+    }
+
+    // Keyless door: only offered while there is neither a key nor a
+    // credential — it must never overwrite a subscriber/owner token.
+    if (!this.plugin.settings.apiKey && !this.plugin.settings.backendToken) {
+      new Setting(containerEl)
+        .setName(t('settings.trial.name'))
+        .setDesc(t('settings.trial.desc'))
+        .addButton((btn) => {
+          btn
+            .setButtonText(t('settings.trial.button'))
+            .setCta()
+            .onClick(async () => {
+              await this.plugin.startTrial()
               this.display()
             })
         })

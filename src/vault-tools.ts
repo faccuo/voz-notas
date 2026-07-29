@@ -13,6 +13,8 @@ export interface VaultToolsSettings {
   language: string
   assistantName: string
   saveSessions: boolean
+  relayUrl: string
+  backendToken: string
 }
 
 export interface VaultToolsConfig {
@@ -426,7 +428,9 @@ export class VaultToolExecutor implements ToolExecutor {
     return 'Remembered — it will apply next session.'
   }
 
-  // --- Delegate deep reasoning to a stronger model over the given notes (BYOK, same key) ---
+  // --- Delegate deep reasoning to a stronger model over the given notes ---
+  // BYOK with the user's key; keyless (trial/subscription) through the relay
+  // backend's /think proxy, which holds the prompt shape and the quota.
 
   async think(question: string, paths: string[]): Promise<string> {
     const chunks: string[] = []
@@ -438,6 +442,26 @@ export class VaultToolExecutor implements ToolExecutor {
       }
     }
     const context = chunks.length ? chunks.join('\n\n---\n\n') : '(no notes provided)'
+    const s = this.getSettings()
+    if (!s.apiKey && s.backendToken) {
+      try {
+        const res = await requestUrl({
+          url: s.relayUrl.replace(/^ws/, 'http').replace(/\/+$/, '') + '/think',
+          method: 'POST',
+          headers: { Authorization: `Bearer ${s.backendToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, context }),
+          throw: false,
+        })
+        if (res.status === 401) return 'The trial has ended — add an OpenAI key to keep using think.'
+        if (res.status === 403) return 'The trial think quota is used up — add an OpenAI key to keep using think.'
+        const data = res.json as { answer?: unknown } | undefined
+        const answer = data?.answer
+        return typeof answer === 'string' && answer.trim() ? answer : 'Could not get a reasoned answer.'
+      } catch (e) {
+        console.error('think proxy error:', e)
+        return 'The reasoning service failed: ' + (e as Error).message
+      }
+    }
     try {
       const res = await requestUrl({
         url: 'https://api.openai.com/v1/chat/completions',
