@@ -338,6 +338,20 @@ export default class VozNotasPlugin extends Plugin {
       name: 'Toggle mute',
       callback: () => this.toggleMute(),
     })
+    this.addCommand({
+      id: 'show-pairing-qr',
+      name: 'Show pairing QR (pair a phone)',
+      callback: () => {
+        // Pairing implies remote control — switch it on if needed so the
+        // QR is "live" (the auto-close relies on the bridge being in the room).
+        if (!this.settings.remoteEnabled) {
+          this.settings.remoteEnabled = true
+          void this.saveSettings()
+          this.startRemote()
+        }
+        new PairingQrModal(this, this.pairingPayload()).open()
+      },
+    })
 
     // The side panel (transcript + consulted notes + orb).
     this.registerView(VIEW_TYPE, (leaf) => new VozNotasView(leaf, this))
@@ -402,19 +416,22 @@ export default class VozNotasPlugin extends Plugin {
       secret: this.settings.remoteSecret,
       // The same executor the local voice session uses — this line IS the product.
       execute: (name, args) => {
-        // Make the phone's activity visible on the desktop: a notice always
-        // (works with the panel closed) and an activity line if it's open.
-        // Service calls (bootstrap, transcript flushes) stay silent — they
-        // are plumbing, not user activity, and flushes repeat every few turns.
+        // Remote access must never be invisible — but the panel's activity
+        // line is the primary surface; the (brief) notice is only the
+        // fallback when the panel is closed. Service calls (bootstrap,
+        // transcript flushes) stay silent — they are plumbing.
         if (name !== 'init_session' && name !== 'save_session') {
           const label = t('activity.remote', activityLabel(name, args))
-          new Notice(label)
-          this.getView()?.addActivity(label)
+          const view = this.getView()
+          if (view) view.addActivity(label)
+          else new Notice(label, 2500)
         }
         return this.tools.execute(name, args)
       },
       onStatus: (status) => {
-        new Notice(t(`remote.status.${status}`))
+        // 'connecting' fires on every retry — pure noise. The transitions
+        // that matter (phone joined / remote down) stay, briefly.
+        if (status !== 'connecting') new Notice(t(`remote.status.${status}`), 2500)
         // The phone just joined the room: the QR has served its purpose.
         if (status === 'paired') this.qrModal?.close()
       },
