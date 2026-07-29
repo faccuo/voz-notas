@@ -292,6 +292,7 @@ export default class VozNotasPlugin extends Plugin {
   session: VoiceSession | null = null
   tools!: VaultToolExecutor // set in onload(), after settings are loaded
   remote: RemoteBridge | null = null
+  qrModal: PairingQrModal | null = null
   // Transcript of the current session, kept here (not in the view) so it
   // survives the panel being closed. Saved as a note when the session ends.
   sessionLog: Array<{ role: 'user' | 'assistant'; id?: string; text: string }> = []
@@ -412,7 +413,11 @@ export default class VozNotasPlugin extends Plugin {
         }
         return this.tools.execute(name, args)
       },
-      onStatus: (status) => new Notice(t(`remote.status.${status}`)),
+      onStatus: (status) => {
+        new Notice(t(`remote.status.${status}`))
+        // The phone just joined the room: the QR has served its purpose.
+        if (status === 'paired') this.qrModal?.close()
+      },
     })
     this.remote.start()
   }
@@ -875,7 +880,7 @@ class VozNotasSettingTab extends PluginSettingTab {
           btn
             .setButtonText(t('settings.qr.button'))
             .setCta()
-            .onClick(() => new PairingQrModal(this.app, this.plugin.pairingPayload()).open())
+            .onClick(() => new PairingQrModal(this.plugin, this.plugin.pairingPayload()).open())
         })
 
       new Setting(containerEl)
@@ -948,11 +953,17 @@ class VozNotasSettingTab extends PluginSettingTab {
 // The pairing QR: scanned by the mobile app. Rendered locally (no network) —
 // the payload holds the relay URL, the session id and the E2E secret.
 class PairingQrModal extends Modal {
-  constructor(app: App, private payload: string) {
-    super(app)
+  constructor(
+    private plugin: VozNotasPlugin,
+    private payload: string,
+  ) {
+    super(plugin.app)
   }
 
   async onOpen() {
+    // Register so the remote bridge can close this modal the moment the
+    // phone joins the room — scanned means done.
+    this.plugin.qrModal = this
     this.contentEl.addClass('vn-qr-modal')
     this.contentEl.createEl('h3', { text: t('qr.title') })
     const dataUrl = await QRCode.toDataURL(this.payload, { width: 300, margin: 1 })
@@ -967,6 +978,7 @@ class PairingQrModal extends Modal {
   }
 
   onClose() {
+    if (this.plugin.qrModal === this) this.plugin.qrModal = null
     this.contentEl.empty()
   }
 }
