@@ -345,16 +345,7 @@ export default class VozNotasPlugin extends Plugin {
     this.addCommand({
       id: 'show-pairing-qr',
       name: 'Show pairing QR (pair a phone)',
-      callback: () => {
-        // Pairing implies remote control — switch it on if needed so the
-        // QR is "live" (the auto-close relies on the bridge being in the room).
-        if (!this.settings.remoteEnabled) {
-          this.settings.remoteEnabled = true
-          void this.saveSettings()
-          this.startRemote()
-        }
-        new PairingQrModal(this, this.pairingPayload()).open()
-      },
+      callback: () => this.showPairingQr(),
     })
 
     // The side panel (transcript + consulted notes + orb).
@@ -410,6 +401,18 @@ export default class VozNotasPlugin extends Plugin {
       secret: this.settings.remoteSecret,
       ...(this.settings.backendToken ? { token: this.settings.backendToken } : {}),
     })
+  }
+
+  // Open the pairing QR (panel button and command palette both land here).
+  // Pairing implies remote control — switch it on if needed so the QR is
+  // "live" (the auto-close relies on the bridge being in the room).
+  showPairingQr() {
+    if (!this.settings.remoteEnabled) {
+      this.settings.remoteEnabled = true
+      void this.saveSettings()
+      this.startRemote()
+    }
+    new PairingQrModal(this, this.pairingPayload()).open()
   }
 
   startRemote() {

@@ -233,6 +233,13 @@
   color: var(--text-normal);
 }
 
+.vn-pair {
+  opacity: 0.55;
+}
+.vn-pair:hover {
+  opacity: 1;
+}
+
 .vn-qr-modal {
   text-align: center;
 }

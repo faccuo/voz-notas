@@ -65,6 +65,13 @@ export class VozNotasView extends ItemView {
     setIcon(this.stopEl, 'phone-off')
     this.stopEl.onClickEvent(() => void this.plugin.toggleVoice())
 
+    // Pair-a-phone shortcut: the QR modal, right where the user already is.
+    const pairBtn = statusRow.createEl('button', { cls: 'vn-stop vn-pair' })
+    setIcon(pairBtn, 'qr-code')
+    pairBtn.setAttr('aria-label', t('settings.qr.name'))
+    pairBtn.setAttr('title', t('settings.qr.name'))
+    pairBtn.onClickEvent(() => this.plugin.showPairingQr())
+
     this.transcriptEl = root.createDiv({ cls: 'vn-transcript' })
 
     this.consultedLabelEl = root.createDiv({ cls: 'vn-section-label' })
