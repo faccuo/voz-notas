@@ -19,6 +19,9 @@ interface VozNotasSettings {
   relayUrl: string
   remoteSessionId: string
   remoteSecret: string
+  // Access credential for the relay backend's /session-token endpoint (B1).
+  // Travels to the phone inside the pairing QR; must match the Worker secret.
+  backendToken: string
 }
 
 const DEFAULT_SETTINGS: VozNotasSettings = {
@@ -33,6 +36,7 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   relayUrl: 'ws://localhost:8787',
   remoteSessionId: '',
   remoteSecret: '',
+  backendToken: '',
 }
 
 const INSTRUCTIONS = `You are a voice assistant over the user's personal Obsidian notes (Markdown, linked with [[wikilinks]], tagged with #tags).
@@ -404,6 +408,7 @@ export default class VozNotasPlugin extends Plugin {
       relay: this.settings.relayUrl,
       session: this.settings.remoteSessionId,
       secret: this.settings.remoteSecret,
+      ...(this.settings.backendToken ? { token: this.settings.backendToken } : {}),
     })
   }
 
@@ -888,6 +893,17 @@ class VozNotasSettingTab extends PluginSettingTab {
               this.plugin.settings.relayUrl = value.trim() || 'ws://localhost:8787'
               await this.plugin.saveSettings()
             })
+        })
+
+      new Setting(containerEl)
+        .setName(t('settings.backendToken.name'))
+        .setDesc(t('settings.backendToken.desc'))
+        .addText((text) => {
+          text.inputEl.type = 'password'
+          text.setValue(this.plugin.settings.backendToken).onChange(async (value) => {
+            this.plugin.settings.backendToken = value.trim()
+            await this.plugin.saveSettings()
+          })
         })
 
       new Setting(containerEl)
