@@ -37,6 +37,7 @@ export class RemoteBridge {
   private ws: WebSocket | null = null
   private stopped = false
   private retryTimer: number | null = null
+  private pingTimer: number | null = null
   private key: Uint8Array | null
 
   constructor(private config: RemoteBridgeConfig) {
@@ -52,6 +53,8 @@ export class RemoteBridge {
     this.stopped = true
     if (this.retryTimer != null) window.clearTimeout(this.retryTimer)
     this.retryTimer = null
+    if (this.pingTimer != null) window.clearInterval(this.pingTimer)
+    this.pingTimer = null
     this.ws?.close(1000, 'remote control disabled')
     this.ws = null
     this.config.onStatus?.('disconnected')
@@ -68,12 +71,22 @@ export class RemoteBridge {
     const ws = new WebSocket(`${base}/ws/${this.config.sessionId}?role=desktop`)
     this.ws = ws
 
-    ws.addEventListener('open', () => this.config.onStatus?.('connected'))
+    ws.addEventListener('open', () => {
+      this.config.onStatus?.('connected')
+      // Keepalive: Cloudflare reaps idle sockets (~100s); the relay answers
+      // 'pong' without waking the DO. The reply is not JSON → onMessage drops it.
+      if (this.pingTimer != null) window.clearInterval(this.pingTimer)
+      this.pingTimer = window.setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+      }, 30000)
+    })
 
     ws.addEventListener('message', (e) => void this.onMessage(e))
 
     // Any close (laptop slept, relay redeployed…) → retry until stopped.
     ws.addEventListener('close', () => {
+      if (this.pingTimer != null) window.clearInterval(this.pingTimer)
+      this.pingTimer = null
       if (this.stopped) return
       this.config.onStatus?.('disconnected')
       this.retryTimer = window.setTimeout(() => this.connect(), 3000)
