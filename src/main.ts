@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: VozNotasSettings = {
   assistantName: 'Eco',
   notesFolder: 'Eco',
   remoteEnabled: false,
-  relayUrl: 'wss://voz-notas-relay.personal-11f.workers.dev',
+  relayUrl: 'wss://relay.voznotas.app',
   remoteSessionId: '',
   remoteSecret: '',
   backendToken: '',
