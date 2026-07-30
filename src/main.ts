@@ -313,6 +313,7 @@ export default class VozNotasPlugin extends Plugin {
   private pendingEndSession = false
   private endFallbackTimer: number | null = null
   private sessionCapTimer: number | null = null
+  private remotePaired = false
   private statusBarEl: HTMLElement | null = null
 
   async onload() {
@@ -465,9 +466,17 @@ export default class VozNotasPlugin extends Plugin {
         return this.tools.execute(name, args)
       },
       onStatus: (status) => {
-        // 'connecting' fires on every retry — pure noise. The transitions
-        // that matter (phone joined / remote down) stay, briefly.
-        if (status !== 'connecting') new Notice(t(`remote.status.${status}`), 2500)
+        // Toast ONLY the presence transition (phone joined / phone left),
+        // deduped by state. Connection churn — reconnects, scan probes,
+        // session open/close cycles — repeats these statuses constantly and
+        // must stay silent, or the desktop drowns in toasts.
+        if (status === 'paired' || status === 'connected') {
+          const isPaired = status === 'paired'
+          if (isPaired !== this.remotePaired) {
+            this.remotePaired = isPaired
+            new Notice(t(`remote.status.${status}`), 2500)
+          }
+        }
         // The phone just joined the room: the QR has served its purpose.
         if (status === 'paired') this.qrModal?.close()
       },
