@@ -312,6 +312,7 @@ export default class VozNotasPlugin extends Plugin {
   // Set when the model calls end_session: we close AFTER its goodbye finishes playing.
   private pendingEndSession = false
   private endFallbackTimer: number | null = null
+  private sessionCapTimer: number | null = null
   private statusBarEl: HTMLElement | null = null
 
   async onload() {
@@ -690,6 +691,8 @@ export default class VozNotasPlugin extends Plugin {
       this.session.stop()
       this.session = null
       this.pendingEndSession = false
+      if (this.sessionCapTimer != null) window.clearTimeout(this.sessionCapTimer)
+      this.sessionCapTimer = null
       if (this.endFallbackTimer != null) window.clearTimeout(this.endFallbackTimer)
       this.endFallbackTimer = null
       const view = this.getView()
@@ -743,6 +746,14 @@ export default class VozNotasPlugin extends Plugin {
         onToolCall: (name, args) => this.handleToolCall(name, args),
         onEvent: (e) => this.onRealtimeEvent(e),
       })
+      // Cost guard, keyless mode only: sessions bill against the backend's
+      // key, and a forgotten session is real money. BYOK pays for itself.
+      if (!this.settings.apiKey && this.settings.backendToken) {
+        this.sessionCapTimer = window.setTimeout(() => {
+          if (this.session) void this.toggleVoice()
+          new Notice(t('notice.sessionCap'))
+        }, 30 * 60 * 1000)
+      }
       const liveView = this.getView()
       liveView?.setActive(true)
       liveView?.startLevelMeter(() => this.session?.getLevel() ?? 0)
