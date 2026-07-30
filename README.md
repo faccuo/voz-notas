@@ -1,4 +1,4 @@
-# voz-notas
+# VozNotas
 
 **Talk to your Obsidian notes by voice.** Voice-first — not a chat window with a
 mic button, but an assistant built for talking: you speak, it searches and reads
@@ -82,11 +82,11 @@ In plain terms, so you know exactly what this plugin does:
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from a release.
 2. Put them in `<your vault>/.obsidian/plugins/voz-notas/`.
-3. Reload Obsidian and enable **voz-notas** in _Settings → Community plugins_.
+3. Reload Obsidian and enable **VozNotas** in _Settings → Community plugins_.
 
 ## Setup
 
-1. Open **Settings → voz-notas**.
+1. Open **Settings → VozNotas**.
 2. Paste your **OpenAI API key**.
 3. (Optional) Pick the **interface language** (English / Español) and the
    **reasoning model** used by the "think" tool.
