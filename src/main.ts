@@ -721,8 +721,14 @@ export default class VozNotasPlugin extends Plugin {
       const view = await this.activateView()
       view?.clear()
       view?.setConnecting()
-      const token = await this.getEphemeralToken()
-      this.session = await startVoiceSession((offerSdp) => this.postSdp(offerSdp, token), {
+      // Keyless mode: the SDP handshake goes through the relay backend and
+      // no OpenAI credential (not even ephemeral) ever reaches this client.
+      // BYOK: mint and talk to OpenAI directly with the user's own key.
+      const keyless = !this.settings.apiKey && !!this.settings.backendToken
+      const token = keyless ? '' : await this.getEphemeralToken()
+      this.session = await startVoiceSession(
+        (offerSdp) => (keyless ? this.postSdpViaBackend(offerSdp) : this.postSdp(offerSdp, token)),
+        {
         instructions: await this.getInstructions(),
         tools: [
           SEARCH_NOTES_TOOL,
@@ -745,7 +751,8 @@ export default class VozNotasPlugin extends Plugin {
         ],
         onToolCall: (name, args) => this.handleToolCall(name, args),
         onEvent: (e) => this.onRealtimeEvent(e),
-      })
+        },
+      )
       // Cost guard, keyless mode only: sessions bill against the backend's
       // key, and a forgotten session is real money. BYOK pays for itself.
       if (!this.settings.apiKey && this.settings.backendToken) {
@@ -794,24 +801,27 @@ export default class VozNotasPlugin extends Plugin {
     return `${INSTRUCTIONS}\n\n${await this.tools.execute('init_session', {})}`
   }
 
-  // Mint a short-lived ephemeral token: with the user's key if they have one
-  // (BYOK), otherwise through the relay backend with the trial/subscription
-  // credential — the keyless path.
+  // Keyless SDP handshake: offer in, answer out, through the relay backend.
+  // It authorizes with the credential, mints internally (no OpenAI secret
+  // ever reaches this client) and registers the call for the duration reaper.
+  async postSdpViaBackend(offerSdp: string): Promise<string> {
+    const res = await requestUrl({
+      url: relayHttpBase(this.settings.relayUrl) + '/call',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.settings.backendToken}`, 'Content-Type': 'application/sdp' },
+      body: offerSdp,
+      throw: false,
+    })
+    if (res.status === 401) throw new Error(t('trial.expired'))
+    if (res.status === 403) throw new Error(t('trial.limit'))
+    if (res.status === 429) throw new Error(t('trial.rate'))
+    if (res.status !== 200) throw new Error('The voice backend failed (' + res.status + ').')
+    return res.text
+  }
+
+  // Mint a short-lived ephemeral token with the user's own key (BYOK path).
   // requestUrl runs from Obsidian's main process, so it bypasses browser CORS.
   async getEphemeralToken(): Promise<string> {
-    if (!this.settings.apiKey && this.settings.backendToken) {
-      const res = await requestUrl({
-        url: relayHttpBase(this.settings.relayUrl) + '/session-token',
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.settings.backendToken}` },
-        throw: false,
-      })
-      if (res.status === 401) throw new Error(t('trial.expired'))
-      if (res.status === 403) throw new Error(t('trial.limit'))
-      const data = res.json as { value?: unknown }
-      if (typeof data?.value !== 'string') throw new Error('No session token in the backend response.')
-      return data.value
-    }
     const res = await requestUrl({
       url: 'https://api.openai.com/v1/realtime/client_secrets',
       method: 'POST',
