@@ -33,6 +33,18 @@ function syncDevVaults() {
 
 // Bundle src/main.ts -> main.js (CommonJS, what Obsidian loads).
 const context = await esbuild.context({
+  plugins: [
+    {
+      name: 'sync-dev-vaults',
+      setup(build) {
+        // Runs after EVERY rebuild — including each save in watch mode — so
+        // the extra dev vaults always hold the freshest build.
+        build.onEnd((result) => {
+          if (result.errors.length === 0) syncDevVaults()
+        })
+      },
+    },
+  ],
   entryPoints: ['src/main.ts'],
   bundle: true,
   // Obsidian ships these at runtime, so don't bundle them in.
@@ -47,7 +59,6 @@ const context = await esbuild.context({
 
 if (prod) {
   await context.rebuild()
-  syncDevVaults()
   process.exit(0)
 } else {
   // Dev: rebuild on every save.
