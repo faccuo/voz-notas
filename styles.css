@@ -233,6 +233,16 @@
   color: var(--text-normal);
 }
 
+.vn-trial {
+  margin-top: 8px;
+  text-align: center;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.vn-trial.is-hidden {
+  display: none;
+}
+
 .vn-pair {
   opacity: 0.55;
 }

@@ -18,6 +18,7 @@ export class VozNotasView extends ItemView {
   private filesEl!: HTMLElement
   private currentAssistant: HTMLElement | null = null
   private activityEl: HTMLElement | null = null
+  private trialEl: HTMLElement | null = null
   private consulted = new Set<string>()
   private pendingUser = new Map<string, HTMLElement>()
   private phase: Phase = 'idle'
@@ -77,9 +78,21 @@ export class VozNotasView extends ItemView {
     this.consultedLabelEl = root.createDiv({ cls: 'vn-section-label' })
     this.filesEl = root.createDiv({ cls: 'vn-files' })
 
+    // Trial counter (only shown for trial credentials): what's left, always
+    // in sight — not buried in settings.
+    this.trialEl = root.createDiv({ cls: 'vn-trial' })
+    void this.refreshTrialCounter()
+
     this.refreshLang()
     this.applyPhase()
     this.syncFromPlugin()
+  }
+
+  async refreshTrialCounter() {
+    if (!this.trialEl) return
+    const text = await this.plugin.trialCounterText()
+    this.trialEl.setText(text ?? '')
+    this.trialEl.toggleClass('is-hidden', !text)
   }
 
   // The call lives in the plugin, not in this panel — closing the panel never
@@ -110,6 +123,8 @@ export class VozNotasView extends ItemView {
     } else {
       this.currentAssistant = null
       this.setPhase('idle')
+      // A session just ended — the trial counter (if any) moved.
+      void this.refreshTrialCounter()
     }
   }
 

@@ -432,6 +432,25 @@ export default class VozNotasPlugin extends Plugin {
     new Notice(t('trial.started'))
   }
 
+  // Human-readable remaining-units line for trial credentials, or null when
+  // it does not apply (BYOK, unlimited credential, or fetch failure).
+  async trialCounterText(): Promise<string | null> {
+    if (this.settings.apiKey || !this.settings.backendToken) return null
+    try {
+      const res = await requestUrl({
+        url: relayHttpBase(this.settings.relayUrl) + '/status',
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.settings.backendToken}` },
+        throw: false,
+      })
+      const data = res.json as { kind?: string; conversationsLeft?: number; thinksLeft?: number } | undefined
+      if (data?.kind !== 'trial') return null
+      return t('panel.trialLeft', String(data.conversationsLeft ?? 0), String(data.thinksLeft ?? 0))
+    } catch {
+      return null
+    }
+  }
+
   // Open the pairing QR (panel button and command palette both land here).
   // Pairing implies remote control — switch it on if needed so the QR is
   // "live" (the auto-close relies on the bridge being in the room).
@@ -901,6 +920,9 @@ export default class VozNotasPlugin extends Plugin {
 }
 
 class VozNotasSettingTab extends PluginSettingTab {
+  // The user asked to see the key field while on a trial (it hides by default).
+  private revealKeyField = false
+
   constructor(
     app: App,
     private plugin: VozNotasPlugin,
@@ -1079,23 +1101,38 @@ class VozNotasSettingTab extends PluginSettingTab {
       })()
     }
 
-    new Setting(containerEl)
-      .setName('OpenAI API key')
-      .setDesc(
-        this.plugin.settings.backendToken && !this.plugin.settings.apiKey
-          ? t('settings.apiKey.trialDesc')
-          : 'Stored locally in this vault. Only sent to OpenAI to start a session.',
-      )
-      .addText((text) => {
-        text.inputEl.type = 'password' // hide the key as you type
-        text
-          .setPlaceholder('sk-...')
-          .setValue(this.plugin.settings.apiKey)
-          .onChange(async (value) => {
-            this.plugin.settings.apiKey = value.trim()
-            await this.plugin.saveSettings()
+    // On a trial, the key input is TUCKED AWAY: showing an empty credential
+    // field next to a working product reads as "something is missing". One
+    // quiet line offers the BYOK path; the field appears only on demand.
+    if (this.plugin.settings.backendToken && !this.plugin.settings.apiKey && !this.revealKeyField) {
+      new Setting(containerEl)
+        .setName(t('settings.apiKey.own.name'))
+        .setDesc(t('settings.apiKey.trialDesc'))
+        .addButton((btn) => {
+          btn.setButtonText(t('settings.apiKey.own.button')).onClick(() => {
+            this.revealKeyField = true
+            this.display()
           })
-      })
+        })
+    } else {
+      new Setting(containerEl)
+        .setName('OpenAI API key')
+        .setDesc(
+          this.plugin.settings.backendToken && !this.plugin.settings.apiKey
+            ? t('settings.apiKey.trialDesc')
+            : 'Stored locally in this vault. Only sent to OpenAI to start a session.',
+        )
+        .addText((text) => {
+          text.inputEl.type = 'password' // hide the key as you type
+          text
+            .setPlaceholder('sk-...')
+            .setValue(this.plugin.settings.apiKey)
+            .onChange(async (value) => {
+              this.plugin.settings.apiKey = value.trim()
+              await this.plugin.saveSettings()
+            })
+        })
+    }
 
     new Setting(containerEl)
       .setName('Reasoning model')
