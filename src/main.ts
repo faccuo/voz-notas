@@ -922,6 +922,8 @@ export default class VozNotasPlugin extends Plugin {
 class VozNotasSettingTab extends PluginSettingTab {
   // The user asked to see the key field while on a trial (it hides by default).
   private revealKeyField = false
+  // Self-host plumbing (relay URL, backend credential), hidden by default.
+  private showAdvanced = false
 
   constructor(
     app: App,
@@ -1000,30 +1002,6 @@ class VozNotasSettingTab extends PluginSettingTab {
 
     if (this.plugin.settings.remoteEnabled) {
       new Setting(containerEl)
-        .setName(t('settings.relayUrl.name'))
-        .setDesc(t('settings.relayUrl.desc'))
-        .addText((text) => {
-          text
-            .setPlaceholder('ws://localhost:8787')
-            .setValue(this.plugin.settings.relayUrl)
-            .onChange(async (value) => {
-              this.plugin.settings.relayUrl = value.trim() || 'ws://localhost:8787'
-              await this.plugin.saveSettings()
-            })
-        })
-
-      new Setting(containerEl)
-        .setName(t('settings.backendToken.name'))
-        .setDesc(t('settings.backendToken.desc'))
-        .addText((text) => {
-          text.inputEl.type = 'password'
-          text.setValue(this.plugin.settings.backendToken).onChange(async (value) => {
-            this.plugin.settings.backendToken = value.trim()
-            await this.plugin.saveSettings()
-          })
-        })
-
-      new Setting(containerEl)
         .setName(t('settings.qr.name'))
         .setDesc(t('settings.qr.desc'))
         .addButton((btn) => {
@@ -1056,6 +1034,44 @@ class VozNotasSettingTab extends PluginSettingTab {
               this.display()
             })
         })
+
+      // Plumbing (relay URL, backend credential): normal users get these via
+      // the QR and the trial — only self-hosters should ever touch them.
+      new Setting(containerEl)
+        .setName(t('settings.advanced.name'))
+        .setDesc(t('settings.advanced.desc'))
+        .addButton((btn) => {
+          btn.setButtonText(t(this.showAdvanced ? 'settings.advanced.hide' : 'settings.advanced.show')).onClick(() => {
+            this.showAdvanced = !this.showAdvanced
+            this.display()
+          })
+        })
+
+      if (this.showAdvanced) {
+        new Setting(containerEl)
+          .setName(t('settings.relayUrl.name'))
+          .setDesc(t('settings.relayUrl.desc'))
+          .addText((text) => {
+            text
+              .setPlaceholder('wss://relay.voznotas.app')
+              .setValue(this.plugin.settings.relayUrl)
+              .onChange(async (value) => {
+                this.plugin.settings.relayUrl = value.trim() || 'wss://relay.voznotas.app'
+                await this.plugin.saveSettings()
+              })
+          })
+
+        new Setting(containerEl)
+          .setName(t('settings.backendToken.name'))
+          .setDesc(t('settings.backendToken.desc'))
+          .addText((text) => {
+            text.inputEl.type = 'password'
+            text.setValue(this.plugin.settings.backendToken).onChange(async (value) => {
+              this.plugin.settings.backendToken = value.trim()
+              await this.plugin.saveSettings()
+            })
+          })
+      }
     }
 
     // Keyless door: only offered while there is neither a key nor a
