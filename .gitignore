@@ -33,3 +33,4 @@ data.json
 *.njsproj
 *.sln
 *.sw?
+.dev-sync.json
