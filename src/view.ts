@@ -131,7 +131,8 @@ export class VozNotasView extends ItemView {
     const active = this.phase !== 'idle'
     this.orbEl.toggleClass('is-active', active)
     this.orbEl.toggleClass('is-muted', this.phase === 'muted')
-    this.statusEl?.setText(t(`orb.${this.phase}`))
+    const unconfigured = this.phase === 'idle' && !this.plugin.isConfigured()
+    this.statusEl?.setText(t(unconfigured ? 'orb.unconfigured' : `orb.${this.phase}`))
     this.stopEl?.toggleClass('is-visible', active)
     // When not being driven by the meter, drop the inline scale so the orb
     // rests (idle) or freezes (muted) instead of holding its last size.

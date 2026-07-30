@@ -679,9 +679,29 @@ export default class VozNotasPlugin extends Plugin {
   }
 
   // Click the orb: start a session if idle, otherwise mute/unmute.
+  // Neither a key nor a trial/subscription credential yet.
+  isConfigured(): boolean {
+    return !!this.settings.apiKey || !!this.settings.backendToken
+  }
+
+  openOwnSettings() {
+    const setting = (this.app as unknown as { setting: { open(): void; openTabById(id: string): void } }).setting
+    setting.open()
+    setting.openTabById(this.manifest.id)
+  }
+
   onOrbClick() {
-    if (this.session) this.toggleMute()
-    else void this.toggleVoice()
+    if (this.session) {
+      this.toggleMute()
+      return
+    }
+    // Fresh install: don't wait for a failed connect to explain — take the
+    // user straight to the two ways in (free trial / own key).
+    if (!this.isConfigured()) {
+      this.openOwnSettings()
+      return
+    }
+    void this.toggleVoice()
   }
 
   toggleMute() {
@@ -1033,9 +1053,39 @@ class VozNotasSettingTab extends PluginSettingTab {
         })
     }
 
+    // Trial active: lead with the remaining-units counter, fetched live.
+    if (!this.plugin.settings.apiKey && this.plugin.settings.backendToken) {
+      const statusSetting = new Setting(containerEl)
+        .setName(t('settings.trialStatus.name'))
+        .setDesc(t('settings.trialStatus.loading'))
+      void (async () => {
+        try {
+          const res = await requestUrl({
+            url: relayHttpBase(this.plugin.settings.relayUrl) + '/status',
+            method: 'GET',
+            headers: { Authorization: `Bearer ${this.plugin.settings.backendToken}` },
+            throw: false,
+          })
+          const data = res.json as { kind?: string; conversationsLeft?: number; thinksLeft?: number } | undefined
+          if (data?.kind === 'unlimited') statusSetting.setDesc(t('settings.trialStatus.unlimited'))
+          else if (data?.kind === 'trial') {
+            statusSetting.setDesc(
+              t('settings.trialStatus.left', String(data.conversationsLeft ?? 0), String(data.thinksLeft ?? 0)),
+            )
+          } else statusSetting.setDesc(t('settings.trialStatus.error'))
+        } catch {
+          statusSetting.setDesc(t('settings.trialStatus.error'))
+        }
+      })()
+    }
+
     new Setting(containerEl)
       .setName('OpenAI API key')
-      .setDesc('Stored locally in this vault. Only sent to OpenAI to start a session.')
+      .setDesc(
+        this.plugin.settings.backendToken && !this.plugin.settings.apiKey
+          ? t('settings.apiKey.trialDesc')
+          : 'Stored locally in this vault. Only sent to OpenAI to start a session.',
+      )
       .addText((text) => {
         text.inputEl.type = 'password' // hide the key as you type
         text
@@ -1050,12 +1100,19 @@ class VozNotasSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Reasoning model')
       .setDesc('Stronger model used by the "think" tool for opinions and deep analysis.')
-      .addText((text) => {
-        text
-          .setPlaceholder('gpt-5')
-          .setValue(this.plugin.settings.reasoningModel)
+      .addDropdown((drop) => {
+        const options: Record<string, string> = {
+          'gpt-5': 'gpt-5 (recommended)',
+          'gpt-5-mini': 'gpt-5-mini (cheaper)',
+        }
+        // Preserve a custom value someone typed in an earlier version.
+        const current = this.plugin.settings.reasoningModel || 'gpt-5'
+        if (!options[current]) options[current] = current
+        drop
+          .addOptions(options)
+          .setValue(current)
           .onChange(async (value) => {
-            this.plugin.settings.reasoningModel = value.trim() || 'gpt-5'
+            this.plugin.settings.reasoningModel = value
             await this.plugin.saveSettings()
           })
       })
