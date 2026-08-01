@@ -443,6 +443,9 @@ export default class VozNotasPlugin extends Plugin {
         headers: { Authorization: `Bearer ${this.settings.backendToken}` },
         throw: false,
       })
+      // A dead credential must be SAID, not hidden — the ghost-credential
+      // failure mode is invisible otherwise.
+      if (res.status === 401) return t('panel.credInvalid')
       const data = res.json as { kind?: string; conversationsLeft?: number; thinksLeft?: number } | undefined
       if (data?.kind !== 'trial') return null
       return t('panel.trialLeft', String(data.conversationsLeft ?? 0), String(data.thinksLeft ?? 0))
