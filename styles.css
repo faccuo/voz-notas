@@ -1,17 +1,46 @@
+/* "Brutalista Cuerpo" — the panel is OUR screen and speaks the brand: flat
+   fills, thick ink borders, HARD offset shadows (blur is forbidden), radius 0,
+   hierarchy by weight and size. Settings and notices stay native Obsidian.
+   Two grounds: cream + black ink in light themes; theme ground + light ink in
+   dark themes (the classic dark inversion of the system). */
+
+.vn-panel,
+.vn-qr-modal {
+  --vn-ink: #111111;
+  --vn-bg: #fff8ec;
+  --vn-card: #ffffff;
+  --vn-pink: #ff4d6d;
+  --vn-teal: #2ec4b6;
+  --vn-yellow: #ffbf1f;
+  --vn-teal-soft: #cbf0ed;
+  --vn-yellow-soft: #ffecbc;
+}
+.theme-dark .vn-panel,
+.theme-dark .vn-qr-modal {
+  --vn-ink: #fff3dc;
+  --vn-bg: var(--background-primary);
+  --vn-card: color-mix(in srgb, var(--background-primary) 86%, #fff8ec);
+  /* softs stay OPAQUE pre-mixes, never translucency */
+  --vn-teal-soft: color-mix(in srgb, #2ec4b6 24%, var(--background-primary));
+  --vn-yellow-soft: color-mix(in srgb, #ffbf1f 20%, var(--background-primary));
+}
+
 .vn-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
+  padding: 14px;
   height: 100%;
+  background: var(--vn-bg);
+  color: var(--vn-ink);
 }
 
 .vn-orbwrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 14px 0 8px;
+  gap: 12px;
+  padding: 16px 0 10px;
 }
 .vn-statusrow {
   display: flex;
@@ -19,97 +48,89 @@
   gap: 10px;
 }
 .vn-status {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--vn-ink);
+  opacity: 0.6;
 }
-/* hang-up button — a soft red pebble, sized to feel kin to the orb */
+
+/* hang-up: primary action → pink, square, hard shadow */
 .vn-stop {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--color-red, #e93147) 14%, var(--background-secondary));
-  color: color-mix(in srgb, var(--color-red, #e93147) 75%, var(--text-muted));
+  border: 3px solid var(--vn-ink);
+  border-radius: 0;
+  background: var(--vn-pink);
+  color: #ffffff;
   cursor: pointer;
-  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--color-red, #e93147) 40%, transparent);
-  transition: background 0.15s ease, transform 0.15s ease, color 0.15s ease;
+  box-shadow: 3px 3px 0 var(--vn-ink);
 }
 .vn-stop.is-visible {
   display: flex;
 }
 .vn-stop:hover {
-  background: color-mix(in srgb, var(--color-red, #e93147) 85%, var(--background-secondary));
-  color: #fff;
-  transform: scale(1.08);
+  opacity: 0.85;
 }
 .vn-stop svg {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
+}
+/* pair-a-phone: secondary sibling of the hang-up button */
+.vn-pair {
+  background: var(--vn-card);
+  color: var(--vn-ink);
+  opacity: 1;
+}
+.vn-pair:hover {
+  background: var(--vn-yellow);
+  opacity: 1;
 }
 
+/* The orb: the one organic shape in a hard-edged system. Flat fill, ink
+   border, hard shadow that follows the morphing outline. */
 .vn-orb {
   position: relative;
   cursor: pointer;
   width: 76px;
   height: 76px;
   border-radius: 60% 40% 55% 45% / 55% 45% 55% 45%;
-  background: radial-gradient(
-    circle at 34% 30%,
-    var(--interactive-accent),
-    color-mix(in srgb, #e0466b 50%, var(--interactive-accent)) 72%,
-    #e0466b
-  );
-  box-shadow: 0 0 38px -4px color-mix(in srgb, var(--interactive-accent) 60%, transparent);
-  opacity: 0.5;
-  transition: opacity 0.3s ease;
-}
-/* gloss highlight */
-.vn-orb::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.5), transparent 42%);
-}
-/* pulse ring on voice activity — glow only, so it doesn't fight the morph */
-.vn-orb::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 0%, transparent);
+  border: 3px solid var(--vn-ink);
+  background: var(--vn-card);
+  box-shadow: 5px 5px 0 var(--vn-ink);
 }
 .vn-orb.is-active {
-  opacity: 1;
+  background: var(--vn-pink); /* pink = action, alive */
   animation: vn-morph 3.6s ease-in-out infinite;
 }
-.vn-orb.is-pulse::before {
-  animation: vn-ring 0.55s ease-out;
+.vn-orb.is-pulse {
+  animation: vn-morph 3.6s ease-in-out infinite, vn-pop 0.35s ease-out;
 }
-/* crossed-out mic badge, above the gloss */
+/* crossed-out mic badge */
 .vn-orb-badge {
   position: absolute;
   inset: 0;
   z-index: 2;
   display: none;
   place-items: center;
-  color: var(--text-on-accent);
+  color: var(--vn-ink);
   pointer-events: none;
 }
 .vn-orb-badge svg {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
 }
-/* muted: stop the life, dim, desaturate, show the badge (must win over is-active) */
+/* muted = attention → yellow, frozen, badge on */
 .vn-orb.is-muted {
   animation: none;
-  opacity: 0.5;
-  filter: grayscale(0.65);
+  background: var(--vn-yellow);
+  filter: none;
+  opacity: 1;
 }
 .vn-orb.is-muted .vn-orb-badge {
   display: grid;
@@ -119,17 +140,17 @@
   33% { border-radius: 38% 62% 66% 34% / 55% 68% 32% 45%; }
   66% { border-radius: 58% 42% 34% 66% / 36% 46% 64% 58%; }
 }
-@keyframes vn-ring {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 45%, transparent); }
-  100% { box-shadow: 0 0 0 16px color-mix(in srgb, var(--interactive-accent) 0%, transparent); }
+@keyframes vn-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.07); }
+  100% { transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
   .vn-orb.is-active { animation: none; }
-  .vn-orb.is-pulse::before { animation: none; }
+  .vn-orb.is-pulse { animation: none; }
 }
 
-/* status-bar call indicator — hidden unless a call is live (class-driven,
-   no inline styles, so nothing can get out of sync) */
+/* status-bar call indicator — native surface, stays native */
 .vn-statusbar {
   display: none;
 }
@@ -158,68 +179,77 @@
   .vn-sb-dot { animation: none; }
 }
 
+/* transcript: cards, not bubbles */
 .vn-transcript {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  padding: 2px 6px 6px 2px; /* room for the hard shadows */
   font-size: var(--font-ui-small);
 }
 .vn-turn {
-  padding: 6px 10px;
-  border-radius: 12px;
-  line-height: 1.4;
+  padding: 7px 10px;
+  border: 2px solid var(--vn-ink);
+  border-radius: 0;
+  line-height: 1.45;
   white-space: pre-wrap;
+  font-weight: 500;
+  color: var(--vn-ink);
+  box-shadow: 3px 3px 0 var(--vn-ink);
 }
 .vn-user {
   align-self: flex-end;
   max-width: 85%;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-bottom-right-radius: 3px;
+  background: var(--vn-card);
 }
 .vn-assistant {
   align-self: flex-start;
   max-width: 92%;
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  border-bottom-left-radius: 3px;
+  background: var(--vn-teal-soft);
 }
 .vn-turn.vn-pending {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 .vn-activity {
   align-self: center;
-  font-size: var(--font-ui-smaller);
-  font-style: italic;
-  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--vn-ink);
   animation: vn-activity-pulse 1.6s ease-in-out infinite;
 }
 @keyframes vn-activity-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.95; }
 }
 
 .vn-section-label {
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  letter-spacing: 0.12em;
+  color: var(--vn-ink);
+  opacity: 0.55;
 }
 .vn-files {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   max-height: 30%;
   overflow-y: auto;
+  padding: 0 4px 4px 0; /* room for shadows */
 }
 .vn-file {
   padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
+  border: 2px solid var(--vn-ink);
+  border-radius: 0;
+  background: var(--vn-yellow-soft);
+  color: var(--vn-ink);
   font-size: var(--font-ui-smaller);
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -229,36 +259,43 @@
   flex-shrink: 0;
 }
 .vn-file:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
+  background: var(--vn-yellow);
 }
 
+/* trial counter: a sticker */
 .vn-trial {
-  margin-top: 8px;
+  margin: 8px auto 0;
+  padding: 4px 10px;
+  border: 2px solid var(--vn-ink);
+  background: var(--vn-teal-soft);
+  color: var(--vn-ink);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   text-align: center;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+  transform: rotate(-1deg);
 }
 .vn-trial.is-hidden {
   display: none;
 }
 
-.vn-pair {
-  opacity: 0.55;
-}
-.vn-pair:hover {
-  opacity: 1;
-}
-
 .vn-qr-modal {
   text-align: center;
+}
+.vn-qr-modal h3 {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
 }
 .vn-qr-modal img {
   display: block;
   margin: 0 auto;
   padding: 10px;
   background: white; /* quiet-zone contrast in dark themes */
-  border-radius: 10px;
+  border: 3px solid var(--vn-ink);
+  border-radius: 0;
+  box-shadow: 6px 6px 0 var(--vn-ink);
 }
 .vn-qr-hint {
   color: var(--text-muted);
